@@ -114,10 +114,8 @@ $query = $dbh->prepare($query_str);
 $query->execute();
 # fetch response
 @infoparts = $query->fetchrow_array();
-# destroy the statement handle
-$query->finish();
-# disconnect from the database
-$dbh->disconnect();
+# release the query
+$query->finish;
 
 # Let's make sure that the response is not empty
 if ( !@infoparts or length($infoparts[0]) == 0 or length($infoparts[1]) == 0 ) {
@@ -127,22 +125,25 @@ if ( !@infoparts or length($infoparts[0]) == 0 or length($infoparts[1]) == 0 ) {
  
 $progname =~ s/\\'//g; # TVDB doesn't like apostrophes either
 $subtitle =~ s/\\'//g;
- 
-#print "$progname\n";
-#exit;
 
 #print "Infoparts: " . Dumper(@infoparts) . "\n";
  
 #@infoparts = split(/\t/, $fileinfo);
- 
-$filename = $infoparts[0] . "_" . $infoparts[1];
- 
+
+# put the channel id and starttime into more intuitive variables
+$chanid = $infoparts[0];
+$starttime = $infoparts[1];
+
+# create the recording filename 
+$filename = $chanid . "_" . $starttime;
+
+# some regex to make the filename play nice with the file system 
 $filename =~ s/\ //g;
 $filename =~ s/://g;
 $filename =~ s/-//g;
 $filename .= ".mpg";
 $filename = "$recordings_dir" . $filename;
-print "Filename: $filename\n";
+print "Recording Filename: $filename\n";
  
 $originalairdate = $infoparts[3];
 #chop $originalairdate;
@@ -153,6 +154,21 @@ $date3 = $date2[0];
  
 #print "@date2[0] \n";
 #print "$date3\n";
+
+
+##### before we destroy the statement handle, let's use MySQL to query the cut-list/skip-list
+#$query_str = "SELECT cutlist FROM recorded WHERE chanid=$chanid AND starttime=$starttime";
+#$query = $dbh->prepare($query_str);
+#$query->execute || Die "Unable to query recorded table\n";
+#$querydata = $query->fetchrow_hashref;
+
+
+##### now destroy the MySQL handle
+# destroy the statement handle
+$query->finish();
+# disconnect from the database
+$dbh->disconnect();
+
 
 if ( length($originalairdate) > 0 and length($date3) > 0 ) {
 	print "Original airdate: $originalairdate\n";

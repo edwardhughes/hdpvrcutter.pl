@@ -1,0 +1,57 @@
+//AD  <- Needed to identify//
+
+var app = new Avidemux();
+
+CUTLIST;
+
+//** Video **
+// 01 videos source 
+APPLOAD;
+//04 segments
+app.clearSegments();
+var segmentStart = 0;
+var commLength = 0;
+var mult = 1;
+var fps = FPS1000;
+fps > 50000 ? mult = 2 : mult = 1; 
+//app.video.getFps1000 > 50000 ? mult = 2 : mult = 1; 
+for ( var n=0; n < cutlist.length; n++ ) {
+  // Create regex pattern to extract the two frame counts from each entry in the cutlist
+  var pat = new RegExp("(\\d+)-(\\d+)");
+  // Execute the regex and obtain the two separate integers
+  var result = pat.exec(cutlist[n]);
+  var comm_start = parseInt(result[1]);
+  var comm_end = parseInt(result[2]);
+  // Create the app.addSegment() entries
+  app.addSegment(0,segmentStart*mult,comm_start*mult-segmentStart*mult);
+  // Adjust the next segment start accordingly
+  segmentStart = comm_end;
+  if ( n == cutlist.length - 1 ) {
+    app.addSegment(0,segmentStart*mult,1000000);
+  }
+}
+app.rebuildIndex();
+
+//** Postproc **
+app.video.setPostProc(3,3,0);
+
+app.video.fps1000 = fps;
+
+//** Filters **
+
+//** Video Codec conf **
+app.video.codec("Copy", "CQ=4", "0 ");
+
+//** Audio **
+app.audio.reset();
+app.audio.codec("copy",0,0,"");
+app.audio.normalizeMode=0;
+app.audio.normalizeValue=0;
+app.audio.delay=0;
+app.audio.mixer="NONE";
+app.setContainer("AVI");
+setSuccess(1);
+//app.Exit();
+//SAVEFILE;
+//End of script
+

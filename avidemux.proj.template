@@ -14,7 +14,6 @@ var commLength = 0;
 var mult = 1;
 var fps = FPS1000;
 fps > 50000 ? mult = 2 : mult = 1; 
-//app.video.getFps1000 > 50000 ? mult = 2 : mult = 1; 
 for ( var n=0; n < cutlist.length; n++ ) {
   // Create regex pattern to extract the two frame counts from each entry in the cutlist
   var pat = new RegExp("(\\d+)-(\\d+)");
@@ -31,17 +30,12 @@ for ( var n=0; n < cutlist.length; n++ ) {
   }
 }
 app.rebuildIndex();
-
 //** Postproc **
 app.video.setPostProc(3,3,0);
-
 app.video.fps1000 = fps;
-
 //** Filters **
-
 //** Video Codec conf **
 app.video.codec("Copy", "CQ=4", "0 ");
-
 //** Audio **
 app.audio.reset();
 app.audio.codec("copy",0,0,"");
@@ -54,4 +48,3 @@ setSuccess(1);
 //app.Exit();
 //SAVEFILE;
 //End of script
-

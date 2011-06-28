@@ -2,9 +2,10 @@
 #
 # HD-PVR Cutter
 #
+#	Modified by: Edward Hughes IV (edward ATSIGN edwardhughes DOT org)
+#
 #	Originally written by: Christopher Meredith (chmeredith {at} gmail)
 #
-#	Modified by: Edward Hughes IV (edward ATSIGN edwardhughes DOT org)
 #
 # Lossless commercial cutting of HD-PVR recordings using avidemux
 #
@@ -22,7 +23,6 @@
 #
 # Requires:
 #    
-#    (not required as of v0.3) mythcommflag patch written by Robert McNamara (http://svn.mythtv.org/trac/ticket/5809)
 #    AVIDemux 2.4 SVN revision 4445 or later (current 10/7/08)
 #    Working MythTV setup (To steal the cutlist from)
 #    MKVtoolnix (to fix indexing and drop into an MKV)
@@ -31,6 +31,10 @@
 #
 #    hdpvrcutter %TITLE% ---- %SUBTITLE% 
 #
+
+### Version 0.4 - 2011/06/19
+#   - Added frame rate detection through use of ffmpeg system call
+#   - Added additional error handling and fallback to commercial skip-list if no cutlist is found
 
 ### Version 0.3 - 2011/03/16
 #   - Removed dependency on mythcommflag patch.

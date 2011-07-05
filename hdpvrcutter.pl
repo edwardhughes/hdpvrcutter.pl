@@ -461,8 +461,6 @@ if ($subtitle ne "")
 # now to create the avidemux project file - we will use a template
 # first, copy the template to the temp directory
 copy("/usr/local/share/mythtv/avidemux.proj.template","$temp_dir/avidemux.proj");
-# now replace the CUTLIST placeholder with the appropriate array string
-system "sed -i 's/CUTLIST/var cutlist = [$cutlist_line]/' $temp_dir/avidemux.proj";
 $temp_filename = $filename;
 $temp_filename =~ s/\//\\\//g;
 #print $temp_filename;
@@ -541,19 +539,19 @@ for ( $n=0; $n < $cutlist_segments; $n++ ) {
 system "sed -i 's/APPADDSEGMENT/$cutlist_sub_str/' $temp_dir/avidemux.proj";
 
 # now replace the APPLOAD placeholder with the appropriate app.load() string
-system "sed -i 's/APPLOAD/app.load\(\"$temp_filename\"\)/' $temp_dir/avidemux.proj";
+system "sed -i 's/APPLOAD/app.loadVideo\(\"$temp_filename\"\)/' $temp_dir/avidemux.proj";
 # and the FPS1000 substitution
 #system "sed -i 's/FPS1000/$fps1000/' $temp_dir/avidemux.proj";
 #exit 99;
 
 # Finally, the call to avidemux
 #system "nice -n 9 avidemux2_cli --force-smart --nogui --run \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.avi\" --quit 2> /dev/null";
-system "nice -n 9 avidemux3_cli --runpy \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.avi\" --quit 2> /dev/null";
+system "nice -n 9 avidemux3_cli --nogui --runpy \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.avi\" --quit 2> /dev/null";
  
 # Move the AVI file into a Matroska.  
 # Failure to do this will result in broken seeking.
 system "mkvmerge -o  \"$output_dir\"/\"$outfile\.mkv\"  \"$temp_dir\"/\"$outfile\.avi\"";
  
 # Do a little cleanup.
-system "rm $temp_dir/*";
+#system "rm $temp_dir/*";
 

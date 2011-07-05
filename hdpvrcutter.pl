@@ -123,7 +123,7 @@ $query->finish;
 
 # Let's make sure that the response is not empty
 if ( !@infoparts or length($infoparts[0]) == 0 or length($infoparts[1]) == 0 ) {
-	print "Empty response from database...exiting!";
+	print "Empty response from database...exiting!\n";
 	exit 1;  # We'll exit with a non-zero exit code.  The '1' has no significance at this time.
 }
  
@@ -178,7 +178,7 @@ if ( length($originalairdate) > 0 and length($date3) > 0 ) {
 	print "Original airdate: $originalairdate\n";
 	print "Recorded Date: $date3\n";
 } else {
-	print "Zero length query strings for thetvdb.com...exiting!";
+	print "Zero length query strings for thetvdb.com...exiting!\n";
 	exit 1; # Same here...the '1' indicates exit with error without specifics
 }
 #exit;
@@ -335,6 +335,7 @@ sub levenshtein
 sub search_the_tv_db_for_series
 {
         my $series = $_[0];
+	my @bad_series_array = $_[1];
         print "Searching THE-TV-DB for series '$series'\n";
         my $series_for_url = $series;
         my $scontent = get_http_response("http://".$THETVDB."/api/GetSeries.php?seriesname=$series_for_url");
@@ -342,6 +343,7 @@ sub search_the_tv_db_for_series
         my $poster = "";
         my $plot = "";
         my $tvdb_series_name = "";
+	my $while_ctr = 0;
  
         my $best_similarity = 1000000;
         #? marks the regexp as ungreedy (don't look for the longest, look for the first - which is actually IS a greedy algorithm...)
@@ -349,12 +351,13 @@ sub search_the_tv_db_for_series
         #while ($scontent =~ m/<seriesid>(.+?)<\/seriesid>.*?<seriesname>(.+?)<\/seriesname>.*?<banner>(.+?)<\/banner>.*?<overview>(.+?)<\/overview>/gi)
         while ($scontent =~ m/<series>.*?<seriesid>(.+?)<\/seriesid>.*?<seriesname>(.+?)<\/seriesname>(.+?)<\/series>/gi)
         {
+		print "Loop: $while_ctr\n";
                 my $temp_series_id = $1;
                 my $temp_series_name = $2;
                 my $current_similarity = levenshtein($series, $temp_series_name);
                 #print "++++++++++++++++++++++++++++++++++++++++++\n";
                 #print "Best similarity: $best_similarity Current: $current_similarity\n";
-                if ($current_similarity < $best_similarity)
+                if ( ($current_similarity < $best_similarity) and !(exists {map { $_ => 1 } @bad_series_array}->{$temp_series_id}) )
                 {
                         if ($series_id eq "")
                         {
@@ -375,11 +378,13 @@ sub search_the_tv_db_for_series
                         else {$plot = "";}
                 }
                 #print "++++++++++++++++++++++++++++++++++++++++++\n";
+		$while_ctr++;
         }
         if ((length $series_id) > 0)
         {
                 print "Found ID '$series_id' for series '$series' at THE-TV-DB.\n";
-                return ($series_id);
+		# return both the selected series ID and the count of series in the response
+                return ($series_id,$while_ctr);
         }
         else
         {
@@ -387,16 +392,12 @@ sub search_the_tv_db_for_series
                 return ("", "", "", "", "");
         }
 }
- 
-sub parse_episode_content
+
+sub parse_episode_season_numbers
 {
- 
-	my $series_id = search_the_tv_db_for_series($_[0]);
-	my $content = get_http_response("http://".$THETVDB."/api/GetEpisodeByAirDate.php?apikey=$apikey&seriesid=$series_id&airdate=$airdate");
- 
+	my $content = $_[0];
 	my $episode_number = "";
 	my $season_number = "";
- 
 	if ($content =~ m/<EpisodeNumber>(.+)<\/EpisodeNumber>/i)
 	{
 		$episode_number = sprintf( "%02d", $1 );
@@ -404,21 +405,51 @@ sub parse_episode_content
 	if ($content =~ m/<SeasonNumber>(.+)<\/SeasonNumber>/i)
 	{
 		$season_number = sprintf( "%02d", $1 );
- 
+ 	}
 	return ($season_number, $episode_number);
+}
+ 
+sub parse_episode_content
+{
+ 	my $series_name = $_[0];
+	my $series_ctr = 1;
+	my @bad_series_array;
+	my @series_search_resp = search_the_tv_db_for_series($series_name,@bad_series_array);
+	print Dumper(@series_search_resp);
+	print "\n";
+	my $series_id = $series_search_resp[0];
+	my $series_resp_count = $series_search_resp[1];
+	my $content = get_http_response("http://".$THETVDB."/api/GetEpisodeByAirDate.php?apikey=$apikey&seriesid=$series_id&airdate=$airdate");
+	my @SEC = parse_episode_season_numbers($content);
+	my $episode_number = $SEC[1];
+	my $season_number = $SEC[0];
+	 
+	# Now we need to test for empty responses, which would likely indicate that the wrong series was chosen
+	while ( ( length($season_number) == 0 or length($episode_number) == 0 ) and $series_resp_count > 1 and $series_ctr < $series_resp_count ) {
+		print "No season/episode number match.  There were other series found, trying the others...\n";
+		$series_ctr++;
+		push(@bad_series_array,$series_id);
+		@series_search_resp = search_the_tv_db_for_series($series_name,@bad_series_array);
+		$series_id = $series_search_resp[0];
+		$series_resp_count = $series_search_resp[1];
+		$content = get_http_response("http://".$THETVDB."/api/GetEpisodeByAirDate.php?apikey=$apikey&seriesid=$series_id&airdate=$airdate");
+		@SEC = parse_episode_season_numbers($content);
+		$episode_number = $SEC[1];
+		$season_number = $SEC[0];		
 	}
+	return ($season_number, $episode_number);
+
 }
  
 @T = parse_episode_content($progname);
 $S = $T[0];
 $E = $T[1];
 if ( length($S) == 0 or length($E) == 0 ) {
-	print "Empty season or episode number returned from thetvdb.com...exiting!";
+	print "Empty season or episode number returned from thetvdb.com...exiting!\n";
 	exit 1;
 }
 print "Season Number: $S\n";
 print "Episode Number: $E\n";
-
  
 $outfile = $progname;
 if ($subtitle ne "")
@@ -426,6 +457,42 @@ if ($subtitle ne "")
 #    $outfile = "$progname.S${S}E${E}.$subtitle";
     $outfile = "$progname.S${S}E${E}";
 }
+
+# now to create the avidemux project file - we will use a template
+# first, copy the template to the temp directory
+copy("/usr/local/share/mythtv/avidemux.proj.template","$temp_dir/avidemux.proj");
+# now replace the CUTLIST placeholder with the appropriate array string
+system "sed -i 's/CUTLIST/var cutlist = [$cutlist_line]/' $temp_dir/avidemux.proj";
+$temp_filename = $filename;
+$temp_filename =~ s/\//\\\//g;
+#print $temp_filename;
+
+# now replace the frame rate (fps*1000) by replacing the FPS1000 placeholder
+# use an ffmpeg call to output the fps of the file in question to another file for reading...this is stupid, I know
+#print "\ntemp_filename: $temp_filename\n";
+#system "ffmpeg -i $temp_filename -y /dev/null 2>&1 | grep \"Stream #0.0\" | awk '{print $12}' > $temp_dir/fps.out";
+system "ffmpeg -i $temp_filename -y /dev/null 2>&1 | grep \"Stream #0.0\" > $temp_dir/fps.out";
+open FILE, "$temp_dir/fps.out" or die $!;
+$fps_line = <FILE>;
+close(FILE);
+# make sure the fps string isn't empty, otherwise exit
+if ( length($fps_line) == 0 ) {
+	exit 2;
+}
+#print "FPS line: $fps_line\n";
+# now a little regexp to extract the fps...
+# (using positive lookahead to select the value before the 'fps' identifier)
+if ( $fps_line =~ m/(\d{2}\.\d{1,2})(?=\sfps)/ ) {
+	$fps_val = $1;
+} else {
+	print "Error while trying to determine video FPS.\n";
+	exit 10;
+}
+print "\nDetected FPS: $fps_val\n";
+# at this point we can do the replacement
+$fps1000 = $fps_val * 1000;
+print "FPS1000: $fps1000\n";
+$fps1000 > 50000 ? $fpsmult = 2 : $fpsmult = 1;
  
 # Original exec line used a patched version of mythcommflag - instead, I have implemented some simple Javascript in the avidemux project file
 #exec "mythcommflag --getcutlist-avidemux -f \"$filename\" --outputfile \"$recordings_dir\"/temp.proj;
@@ -452,62 +519,41 @@ if ( $cutlist_line =~ m/Cutlist:\s*$/i ) {
 }	
 # Now extract the cutlist array
 $cutlist_line =~ s/[^-0-9,]//g;
-$cutlist_line = '"' . $cutlist_line . '"';
-$cutlist_line =~ s/,/","/g;
+#$cutlist_line = '"' . $cutlist_line . '"';
+#$cutlist_line =~ s/,/","/g;
 print "Cutlist: $cutlist_line\n";
+# move the addSegment line creation to here...not the tinypy script
+@cutlist_array = split(',', $cutlist_line);
+$cutlist_segments = scalar(@cutlist_array);
+print "There are $cutlist_segments video segments to be spliced.\n";
+$cutlist_sub_str = "";
+$segment_start = 0;
+for ( $n=0; $n < $cutlist_segments; $n++ ) {
+	$cutlist_array[$n] =~ m/(\d+)-(\d+)/;
+	$comm_start = $1;
+	$comm_end = $2;
+	$cutlist_sub_str = $cutlist_sub_str . "app.addSegment(0," . $segment_start*$fpsmult . "," . ($comm_start-$segment_start)*$fpsmult .  ")\\n";
+	$segment_start = $comm_end;
+	if ($ n == $cutlist_segments ) {
+		$cutlist_sub_str = $cutlist_sub_str . "app.addSegment(0," . $segment_start*$fpsmult . ",1000000)\\n";	
+	}
+}
+system "sed -i 's/APPADDSEGMENT/$cutlist_sub_str/' $temp_dir/avidemux.proj";
 
-# now to create the avidemux project file - we will use a template
-# first, copy the template to the temp directory
-copy("/usr/local/share/mythtv/avidemux.proj.template","$temp_dir/avidemux.proj");
-# now replace the CUTLIST placeholder with the appropriate array string
-system "sed -i 's/CUTLIST/var cutlist = [$cutlist_line]/' $temp_dir/avidemux.proj";
-$temp_filename = $filename;
-$temp_filename =~ s/\//\\\//g;
-#print $temp_filename;
 # now replace the APPLOAD placeholder with the appropriate app.load() string
 system "sed -i 's/APPLOAD/app.load\(\"$temp_filename\"\)/' $temp_dir/avidemux.proj";
-# now the save filename
-#$temp_avi = $temp_dir . "/" . $outfile . ".avi";
-#$temp_avi =~ s/\//\\\//g;
-#system "sed -i 's/SAVEFILE/app.save\(\"$temp_avi\"\)/' $temp_dir/avidemux.proj";
-# now replace the frame rate (fps*1000) by replacing the FPS1000 placeholder
-# use an ffmpeg call to output the fps of the file in question to another file for reading...this is stupid, I know
-#print "\ntemp_filename: $temp_filename\n";
-#system "ffmpeg -i $temp_filename -y /dev/null 2>&1 | grep \"Stream #0.0\" | awk '{print $12}' > $temp_dir/fps.out";
-system "ffmpeg -i $temp_filename -y /dev/null 2>&1 | grep \"Stream #0.0\" > $temp_dir/fps.out";
-open FILE, "$temp_dir/fps.out" or die $!;
-$fps_line = <FILE>;
-close(FILE);
-# make sure the fps string isn't empty, otherwise exit
-if ( length($fps_line) == 0 ) {
-	exit 2;
-}
-#print "FPS line: $fps_line\n";
-# now a little regexp to extract the fps...
-# (using positive lookahead to select the value before the 'fps' identifier)
-if ( $fps_line =~ m/(\d{2}\.\d{1,2})(?=\sfps)/ ) {
-	$fps_val = $1;
-} else {
-	print "Error while trying to determine video FPS.\n";
-	exit 10;
-}
-print "\nDetected FPS: $fps_val\n";
-# at this point we can do the replacement
-$fps1000 = $fps_val * 1000;
-print "FPS1000: $fps1000\n";
-system "sed -i 's/FPS1000/$fps1000/' $temp_dir/avidemux.proj";
+# and the FPS1000 substitution
+#system "sed -i 's/FPS1000/$fps1000/' $temp_dir/avidemux.proj";
+#exit 99;
 
-
-#nice -n 9 avidemux2_cli --force-alt-h264 --autoindex --rebuild-index --nogui --force-smart --load \"$filename\" --run \"$recordings_dir\"/temp.proj --save \"$output_dir\"/\"$outfile\.avi\" --quit 2> /dev/null;
-system "nice -n 9 avidemux2_cli --force-smart --nogui --run \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.avi\" --quit 2> /dev/null";
-#system "nice -n 9 avidemux2_cli --force-alt-h264 --nogui --run \"$temp_dir\"/avidemux.proj --quit 2> /dev/null";
+# Finally, the call to avidemux
+#system "nice -n 9 avidemux2_cli --force-smart --nogui --run \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.avi\" --quit 2> /dev/null";
+system "nice -n 9 avidemux3_cli --runpy \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.avi\" --quit 2> /dev/null";
  
 # Move the AVI file into a Matroska.  
 # Failure to do this will result in broken seeking.
- 
 system "mkvmerge -o  \"$output_dir\"/\"$outfile\.mkv\"  \"$temp_dir\"/\"$outfile\.avi\"";
  
 # Do a little cleanup.
-
 system "rm $temp_dir/*";
 

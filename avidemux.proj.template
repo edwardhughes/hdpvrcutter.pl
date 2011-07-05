@@ -45,6 +45,6 @@ app.audio.delay=0;
 app.audio.mixer="NONE";
 app.setContainer("AVI");
 setSuccess(1);
-//app.Exit();
+app.Exit();
 //SAVEFILE;
 //End of script

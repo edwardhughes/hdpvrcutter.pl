@@ -458,15 +458,21 @@ if ($subtitle ne "")
     $outfile = "$progname.S${S}E${E}";
 }
 
-# now to create the avidemux project file - we will use a template
-# first, copy the template to the temp directory
-copy("/usr/local/share/mythtv/avidemux.proj.template","$temp_dir/avidemux.proj");
+#####
+# Start to create the avidemux project file - we will use a template
+#####
+# First, copy the template to the temp directory
+copy("/usr/local/share/mythtv/avidemux.proj.template.py","$temp_dir/avidemux.proj");
 $temp_filename = $filename;
-$temp_filename =~ s/\//\\\//g;
+$temp_filename =~ s/\//\\\//g; # use some regexp to clean the file path by replacing all forward slashes with ???
 #print $temp_filename;
 
-# now replace the frame rate (fps*1000) by replacing the FPS1000 placeholder
-# use an ffmpeg call to output the fps of the file in question to another file for reading...this is stupid, I know
+#####
+# Begin placeholder substitution
+#####
+# Add the correct frame rate (fps*1000) by replacing the FPS1000 placeholder
+### This might not be necessary with avidemux3 (Avidemux 2.6) ###
+# (use an ffmpeg call to output the fps of the file in question to another file for reading...this is stupid, I know)
 #print "\ntemp_filename: $temp_filename\n";
 #system "ffmpeg -i $temp_filename -y /dev/null 2>&1 | grep \"Stream #0.0\" | awk '{print $12}' > $temp_dir/fps.out";
 system "ffmpeg -i $temp_filename -y /dev/null 2>&1 | grep \"Stream #0.0\" > $temp_dir/fps.out";
@@ -487,10 +493,12 @@ if ( $fps_line =~ m/(\d{2}\.\d{1,2})(?=\sfps)/ ) {
 	exit 10;
 }
 print "\nDetected FPS: $fps_val\n";
-# at this point we can do the replacement
+# at this point we can calculate the fps*1000 value...
 $fps1000 = $fps_val * 1000;
 print "FPS1000: $fps1000\n";
 $fps1000 > 50000 ? $fpsmult = 2 : $fpsmult = 1;
+# and, finally the FPS1000 substitution...
+#system "sed -i 's/FPS1000/$fps1000/' $temp_dir/avidemux.proj";
  
 # Original exec line used a patched version of mythcommflag - instead, I have implemented some simple Javascript in the avidemux project file
 #exec "mythcommflag --getcutlist-avidemux -f \"$filename\" --outputfile \"$recordings_dir\"/temp.proj;
@@ -540,8 +548,6 @@ system "sed -i 's/APPADDSEGMENT/$cutlist_sub_str/' $temp_dir/avidemux.proj";
 
 # now replace the APPLOAD placeholder with the appropriate app.load() string
 system "sed -i 's/APPLOAD/app.loadVideo\(\"$temp_filename\"\)/' $temp_dir/avidemux.proj";
-# and the FPS1000 substitution
-#system "sed -i 's/FPS1000/$fps1000/' $temp_dir/avidemux.proj";
 #exit 99;
 
 # Finally, the call to avidemux

@@ -486,7 +486,7 @@ if ( length($fps_line) == 0 ) {
 #print "FPS line: $fps_line\n";
 # now a little regexp to extract the fps...
 # (using positive lookahead to select the value before the 'fps' identifier)
-if ( $fps_line =~ m/(\d{2}\.\d{1,2})(?=\sfps)/ ) {
+if ( $fps_line =~ m/(\d{2}\.\d{1,2})(?=\stbr)/ ) {
 	$fps_val = $1;
 } else {
 	print "Error while trying to determine video FPS.\n";
@@ -497,6 +497,7 @@ print "\nDetected FPS: $fps_val\n";
 $fps1000 = $fps_val * 1000;
 print "FPS1000: $fps1000\n";
 $fps1000 > 50000 ? $fpsmult = 2 : $fpsmult = 1;
+$fpsmult = 1;
 # and, finally the FPS1000 substitution...
 #system "sed -i 's/FPS1000/$fps1000/' $temp_dir/avidemux.proj";
  
@@ -552,7 +553,7 @@ system "sed -i 's/APPLOAD/app.loadVideo\(\"$temp_filename\"\)/' $temp_dir/avidem
 
 # Finally, the call to avidemux
 #system "nice -n 9 avidemux2_cli --force-smart --nogui --run \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.avi\" --quit 2> /dev/null";
-system "nice -n 9 avidemux3_cli --nogui --runpy \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.avi\" --quit 2> /dev/null";
+system "nice -n 9 avidemux3_cli --nogui --runpy \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.ts\" --quit 2> /dev/null";
  
 # Move the AVI file into a Matroska.  
 # Failure to do this will result in broken seeking.

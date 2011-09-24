@@ -470,36 +470,6 @@ $temp_filename =~ s/\//\\\//g; # use some regexp to clean the file path by repla
 #####
 # Begin placeholder substitution
 #####
-# Add the correct frame rate (fps*1000) by replacing the FPS1000 placeholder
-### This might not be necessary with avidemux3 (Avidemux 2.6) ###
-# (use an ffmpeg call to output the fps of the file in question to another file for reading...this is stupid, I know)
-#print "\ntemp_filename: $temp_filename\n";
-#system "ffmpeg -i $temp_filename -y /dev/null 2>&1 | grep \"Stream #0.0\" | awk '{print $12}' > $temp_dir/fps.out";
-system "ffmpeg -i $temp_filename -y /dev/null 2>&1 | grep \"Stream #0.0\" > $temp_dir/fps.out";
-open FILE, "$temp_dir/fps.out" or die $!;
-$fps_line = <FILE>;
-close(FILE);
-# make sure the fps string isn't empty, otherwise exit
-if ( length($fps_line) == 0 ) {
-	exit 2;
-}
-#print "FPS line: $fps_line\n";
-# now a little regexp to extract the fps...
-# (using positive lookahead to select the value before the 'fps' identifier)
-if ( $fps_line =~ m/(\d{2}\.\d{1,2})(?=\stbr)/ ) {
-	$fps_val = $1;
-} else {
-	print "Error while trying to determine video FPS.\n";
-	exit 10;
-}
-print "\nDetected FPS: $fps_val\n";
-# at this point we can calculate the fps*1000 value...
-$fps1000 = $fps_val * 1000;
-print "FPS1000: $fps1000\n";
-$fps1000 > 50000 ? $fpsmult = 2 : $fpsmult = 1;
-$fpsmult = 1;
-# and, finally the FPS1000 substitution...
-#system "sed -i 's/FPS1000/$fps1000/' $temp_dir/avidemux.proj";
  
 # Original exec line used a patched version of mythcommflag - instead, I have implemented some simple Javascript in the avidemux project file
 #exec "mythcommflag --getcutlist-avidemux -f \"$filename\" --outputfile \"$recordings_dir\"/temp.proj;
@@ -535,16 +505,19 @@ $cutlist_segments = scalar(@cutlist_array);
 print "There are $cutlist_segments video segments to be spliced.\n";
 $cutlist_sub_str = "";
 $segment_start = 0;
+$fpsmult = 29.97 * 1000;
 for ( $n=0; $n < $cutlist_segments; $n++ ) {
 	$cutlist_array[$n] =~ m/(\d+)-(\d+)/;
 	$comm_start = $1;
 	$comm_end = $2;
 	$cutlist_sub_str = $cutlist_sub_str . "app.addSegment(0," . $segment_start*$fpsmult . "," . ($comm_start-$segment_start)*$fpsmult .  ")\\n";
 	$segment_start = $comm_end;
-	if ($ n == $cutlist_segments ) {
-		$cutlist_sub_str = $cutlist_sub_str . "app.addSegment(0," . $segment_start*$fpsmult . ",1000000)\\n";	
-	}
+#	if ( $n == $cutlist_segments ) {
+#		print "Adding last segment";
+#	}
 }
+$cutlist_sub_str = $cutlist_sub_str . "app.addSegment(0," . $segment_start*$fpsmult . "," . 1000000*$fpsmult . ")\\n";	
+
 system "sed -i 's/APPADDSEGMENT/$cutlist_sub_str/' $temp_dir/avidemux.proj";
 
 # now replace the APPLOAD placeholder with the appropriate app.load() string
@@ -553,11 +526,11 @@ system "sed -i 's/APPLOAD/app.loadVideo\(\"$temp_filename\"\)/' $temp_dir/avidem
 
 # Finally, the call to avidemux
 #system "nice -n 9 avidemux2_cli --force-smart --nogui --run \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.avi\" --quit 2> /dev/null";
-system "nice -n 9 avidemux3_cli --nogui --runpy \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.ts\" --quit 2> /dev/null";
+system "nice -n 9 avidemux3_cli --nogui --runpy \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.avi\" --quit 2> /dev/null";
  
 # Move the AVI file into a Matroska.  
 # Failure to do this will result in broken seeking.
-system "mkvmerge -o  \"$output_dir\"/\"$outfile\.mkv\"  \"$temp_dir\"/\"$outfile\.avi\"";
+#system "mkvmerge -o  \"$output_dir\"/\"$outfile\.mkv\"  \"$temp_dir\"/\"$outfile\.avi\"";
  
 # Do a little cleanup.
 #system "rm $temp_dir/*";

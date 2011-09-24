@@ -17,6 +17,6 @@ app.videoCodec("Copy")
 app.audioReset()
 app.audioCodec("Copy",0)
 #** Container **
-app.setContainer("MKV")
+app.setContainer("AVI")
 
 #End of script

@@ -470,6 +470,30 @@ $temp_filename =~ s/\//\\\//g; # use some regexp to clean the file path by repla
 #####
 # Begin placeholder substitution
 #####
+
+# Get total video duration from an ffmpeg call
+system "ffmpeg -i $temp_filename -y /dev/null 2>&1 | grep Duration > $temp_dir/fps.out";
+open FILE, "$temp_dir/fps.out" or die $!;
+$ffmpeg_line = <FILE>;
+#print "\n ffmpeg output: $ffmpeg_line\n";
+close(FILE);
+# make sure the fps string isn't empty, otherwise exit
+if ( length($ffmpeg_line) == 0 ) {
+        exit 2;
+}
+# now a little regexp to extract the duration...
+# (using positive lookbehind)
+if ( $ffmpeg_line =~ m/(?<=Duration:\s)(\d{1,4}):(\d{2}):(\d{2}\.\d{2})/ ) {
+        $duration_HH = $1;
+	$duration_MM = $2;
+	$duration_SS = $3;
+} else {
+        print "Error while trying to determine video FPS.\n";
+        exit 10;
+}
+print "Total file duration: $duration_HH:$duration_MM:$duration_SS\n";
+# Compute the total duration in ms
+$total_duration_ms = ($duration_HH*60*60*1000 + $duration_MM*60*1000 + $duration_SS*1000) * 1000;
  
 # Original exec line used a patched version of mythcommflag - instead, I have implemented some simple Javascript in the avidemux project file
 #exec "mythcommflag --getcutlist-avidemux -f \"$filename\" --outputfile \"$recordings_dir\"/temp.proj;
@@ -512,11 +536,10 @@ for ( $n=0; $n < $cutlist_segments; $n++ ) {
 	$comm_end = $2;
 	$cutlist_sub_str = $cutlist_sub_str . "app.addSegment(0," . $segment_start*$fpsmult . "," . ($comm_start-$segment_start)*$fpsmult .  ")\\n";
 	$segment_start = $comm_end;
-#	if ( $n == $cutlist_segments ) {
-#		print "Adding last segment";
-#	}
 }
-$cutlist_sub_str = $cutlist_sub_str . "app.addSegment(0," . $segment_start*$fpsmult . "," . 1000000*$fpsmult . ")\\n";	
+$cutlist_sub_str = $cutlist_sub_str . "app.addSegment(0," . $segment_start*$fpsmult . "," . $total_duration_ms . ")\\n";	
+#$cutlist_sub_str = $cutlist_sub_str . "app.markerA=0\\n";
+#$cutlist_sub_str = $cutlist_sub_str . "app.markerB=$total_duration_ms\\n";
 
 system "sed -i 's/APPADDSEGMENT/$cutlist_sub_str/' $temp_dir/avidemux.proj";
 
@@ -526,11 +549,11 @@ system "sed -i 's/APPLOAD/app.loadVideo\(\"$temp_filename\"\)/' $temp_dir/avidem
 
 # Finally, the call to avidemux
 #system "nice -n 9 avidemux2_cli --force-smart --nogui --run \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.avi\" --quit 2> /dev/null";
-system "nice -n 9 avidemux3_cli --nogui --runpy \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.avi\" --quit 2> /dev/null";
+system "nice -n 9 avidemux3_cli --force-alt-h264 --nogui --runpy \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.mkv\" --quit 2> /dev/null";
  
 # Move the AVI file into a Matroska.  
 # Failure to do this will result in broken seeking.
-#system "mkvmerge -o  \"$output_dir\"/\"$outfile\.mkv\"  \"$temp_dir\"/\"$outfile\.avi\"";
+#system "mkvmerge -o  \"$output_dir\"/\"$outfile\.mkv\"  \"$temp_dir\"/\"$outfile\.mkv\"";
  
 # Do a little cleanup.
 #system "rm $temp_dir/*";

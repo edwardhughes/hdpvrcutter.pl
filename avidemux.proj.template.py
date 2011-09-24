@@ -9,14 +9,14 @@ APPLOAD
 app.clearSegments()
 APPADDSEGMENT
 #** Postproc **
-#app.setPostProc(3,3,0)
+app.setPostProc(3,3,0)
 #** Filters **
 #** Video Codec conf **
 app.videoCodec("Copy")
 #** Audio **
 app.audioReset()
-app.audioCodec("Copy",0)
+app.audioCodec("Copy")
 #** Container **
-app.setContainer("AVI")
+app.setContainer("MKV")
 
 #End of script

@@ -75,7 +75,9 @@ use Data::Dumper;
 
 # Delcare variables with default values
 my $verbose = '';
-my $dryrun = '';
+my $debug = '';
+my $dryrun = 0;
+my $direct_db_cutlist = '';
 my $title = '';
 my $subtitle = '';
 my $mysql_host = 'localhost';
@@ -88,8 +90,11 @@ my $output_dir = '';
 my $help = '';
 
 # Print the help if requested or no arguments are used
-usage() if ( @ARGV < 1 or ! GetOptions( 'verbose' => \$verbose,
+usage() if ( @ARGV < 1 or ! GetOptions( 
+	    'verbose' => \$verbose,
+	    'debug' => \$debug,
 	    'dryrun' => \$dryrun,
+	    'direct-db-cutlist' => \$direct_db_cutlist,
 	    'title=s' => \$title,
 	    'subtitle=s' => \$subtitle,
 	    'host=s' => \$mysql_host,
@@ -104,7 +109,7 @@ usage() if ( @ARGV < 1 or ! GetOptions( 'verbose' => \$verbose,
 sub usage
 {
   print "Unknown option: @_\n" if ( @_ );
-  print "usage: hdpvrcutter.pl --passwd=PASSWORD --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR --title=TITLE --subtitle=SUBTITLE [--verbose] [--dryrun] [--host=HOSTNAME] [--dbname=DBNAME] [--user=USER] [--help|-?]\n";
+  print "usage: hdpvrcutter.pl --passwd=PASSWORD --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR --title=TITLE --subtitle=SUBTITLE [--verbose] [--debug] [--dryrun] [--direct-db-cutlist] [--host=HOSTNAME] [--dbname=DBNAME] [--user=USER] [--help|-?]\n";
   exit;
 }
 
@@ -123,10 +128,19 @@ if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !$tit
 
 # Let's print some feedback about the supplied arguments
 print "Here's what I understand we'll be doing:\n";
-print "I'll be accessing the $mysql_db database on the host '$mysql_host' as the user '$mysql_user' (I'm not going to show you the password)\n";
+print "I'll be accessing the '$mysql_db' database on the host '$mysql_host' as the user '$mysql_user' (I'm not going to show you the password)\n";
 print "I'll then export the recording: $title - $subtitle\n";
-$dryrun ? print "...and I won't actually be exporting anything, just telling you what I would be doing.\n" : 0;
-$verbose ? print "Verbose mode\n" : print "Quiet mode\n";
+$direct_db_cutlist ? print "\n***** I will be accessing the database directly to obtain the cutlist, instead of calling mythcommflag.  THIS IS EXPERIMENTAL! *****\n\n" : 0;
+$dryrun ? print "***** DRY RUN.  WILL NOT PRODUCE ANY OUTPUT FILES. *****\n\n" : 0;
+if ( $debug ) {
+  $debug = 2;
+} else {
+  $debug = 0;
+}
+if ( $verbose ) {
+  print "Verbose mode\n";
+  $debug = 1;
+}
 
 
 ## Proceed with the export
@@ -158,7 +172,7 @@ $subtitle =~ s /\'/\\'/g;
 $dbh = DBI->connect("DBI:mysql:database=" . $mysql_db . ";host=" . $mysql_host, $mysql_user, $mysql_password);
 # prepare the query (this is bad - dynamic query generation - but since this is local and not a web app we'll allow it)
 $query_str = "SELECT chanid,starttime,endtime,originalairdate FROM recorded WHERE title LIKE '$progname' AND subtitle LIKE '$subtitle'";
-print "Query: $query_str\n";
+$debug > 1 ? print "Query: $query_str\n" : 0;
 $query = $dbh->prepare($query_str);
 # Retrieve program information
 # execute query ->
@@ -222,8 +236,8 @@ $dbh->disconnect();
 
 
 if ( length($originalairdate) > 0 and length($date3) > 0 ) {
-	print "Original airdate: $originalairdate\n";
-	print "Recorded Date: $date3\n";
+	$debug >= 1 ? print "Original airdate: $originalairdate\n" : 0;
+	$debug >= 1 ? print "Recorded Date: $date3\n" : 0;
 } else {
 	print "Zero length query strings for thetvdb.com...exiting!\n";
 	exit 1; # Same here...the '1' indicates exit with error without specifics
@@ -239,12 +253,10 @@ else
    $airdate = "$date3";
 }
  
-#print "Airdate: $airdate\n";
- 
 sub get_http_response_lwp
 {
         my $request_url = $_[0];
-        print "About to call GET HTTP url: '$request_url'\n";
+        $debug >= 1 ? print "About to call GET HTTP url: '$request_url'\n" : 0;
         my $req = HTTP::Request->new(GET => $request_url);
  
         # Pass request to the user agent and get a response back
@@ -254,7 +266,8 @@ sub get_http_response_lwp
         if ($res->is_success)
         {
                 my $response_content = $res->content;
-                #print "Got HTTP response:\n".$response_content."\n";
+                $debug >= 1 ? print "Got HTTP response.\n" : 0;
+		$debug > 1 ? print "$response_content\n" : 0;
                 return $response_content;
         }
         else
@@ -301,7 +314,7 @@ sub levenshtein
 	$s1 =~ s/\s+/ /g;
 	$s2 =~ s/\s+/ /g;
  
-	#print "s1: '$s1'. s2: '$s2'\n";
+	$debug > 1 ? print "s1: '$s1'. s2: '$s2'\n" : 0;
  
     my ($len1, $len2) = (length $s1, length $s2);
  
@@ -383,7 +396,7 @@ sub search_the_tv_db_for_series
 {
         my $series = $_[0];
 	my @bad_series_array = $_[1];
-        print "Searching THE-TV-DB for series '$series'\n";
+        $debug >= 1 ? print "Searching THE-TV-DB for series '$series'\n" : 0;
         my $series_for_url = $series;
         my $scontent = get_http_response("http://".$THETVDB."/api/GetSeries.php?seriesname=$series_for_url");
         my $series_id = "";
@@ -398,21 +411,21 @@ sub search_the_tv_db_for_series
         #while ($scontent =~ m/<seriesid>(.+?)<\/seriesid>.*?<seriesname>(.+?)<\/seriesname>.*?<banner>(.+?)<\/banner>.*?<overview>(.+?)<\/overview>/gi)
         while ($scontent =~ m/<series>.*?<seriesid>(.+?)<\/seriesid>.*?<seriesname>(.+?)<\/seriesname>(.+?)<\/series>/gi)
         {
-		print "Loop: $while_ctr\n";
+		$debug > 1 ? print "Loop: $while_ctr\n" : 0;
                 my $temp_series_id = $1;
                 my $temp_series_name = $2;
                 my $current_similarity = levenshtein($series, $temp_series_name);
-                #print "++++++++++++++++++++++++++++++++++++++++++\n";
-                #print "Best similarity: $best_similarity Current: $current_similarity\n";
+                $debug > 1 ? print "++++++++++++++++++++++++++++++++++++++++++\n" : 0;
+                $debug > 1 ? print "Best similarity: $best_similarity Current: $current_similarity\n" : 0;
                 if ( ($current_similarity < $best_similarity) and !(exists {map { $_ => 1 } @bad_series_array}->{$temp_series_id}) )
                 {
                         if ($series_id eq "")
                         {
-                                print "Found a possible match for '$series' as '$temp_series_name' (ID $temp_series_id)\n";
+                                $debug >= 1 ? print "Found a possible match for '$series' as '$temp_series_name' (ID $temp_series_id)\n" : 0;
                         }
                         else
                         {
-                                print "Found a better possible match for '$series' as '$temp_series_name' (ID $temp_series_id)\n";
+                                $debug >= 1 ? print "Found a better possible match for '$series' as '$temp_series_name' (ID $temp_series_id)\n" : 0;
                         }
                         $best_similarity = $current_similarity;
                         $series_id = $1;
@@ -424,12 +437,12 @@ sub search_the_tv_db_for_series
                         if ($rest_of_the_data =~ m/<overview>(.+?)<\/overview>/i){$plot = $1;}
                         else {$plot = "";}
                 }
-                #print "++++++++++++++++++++++++++++++++++++++++++\n";
+                $debug > 1 ? print "++++++++++++++++++++++++++++++++++++++++++\n": 0;
 		$while_ctr++;
         }
         if ((length $series_id) > 0)
         {
-                print "Found ID '$series_id' for series '$series' at THE-TV-DB.\n";
+                print "Found ID '$series_id' for series '$tvdb_series_name' at THE-TV-DB.\n";
 		# return both the selected series ID and the count of series in the response
                 return ($series_id,$while_ctr);
         }
@@ -462,8 +475,7 @@ sub parse_episode_content
 	my $series_ctr = 1;
 	my @bad_series_array;
 	my @series_search_resp = search_the_tv_db_for_series($series_name,@bad_series_array);
-	print Dumper(@series_search_resp);
-	print "\n";
+	$debug > 1 ? print Dumper(@series_search_resp) : 0;
 	my $series_id = $series_search_resp[0];
 	my $series_resp_count = $series_search_resp[1];
 	my $content = get_http_response("http://".$THETVDB."/api/GetEpisodeByAirDate.php?apikey=$apikey&seriesid=$series_id&airdate=$airdate");
@@ -495,8 +507,8 @@ if ( length($S) == 0 or length($E) == 0 ) {
 	print "Empty season or episode number returned from thetvdb.com...exiting!\n";
 	exit 1;
 }
-print "Season Number: $S\n";
-print "Episode Number: $E\n";
+print "\tSeason Number: $S\n";
+print "\tEpisode Number: $E\n";
  
 $outfile = $progname;
 if ($subtitle ne "")
@@ -558,25 +570,27 @@ for ( $n=0; $n < $cutlist_segments; $n++ ) {
 $ctr++;
 print "$cutlist_sub_str\nctr: $ctr\nvidstart: $vidstart\n";
 
-# First we need to run the MPEG-TS file through ffmpeg to mux it into a Matroska container
-system "ffmpeg -y -i $filename -vcodec copy -acodec copy -f matroska $temp_dir/temp.mkv";
+if ( !$dryrun ) {
+	# First we need to run the MPEG-TS file through ffmpeg to mux it into a Matroska container
+	system "ffmpeg -y -i $filename -vcodec copy -acodec copy -f matroska $temp_dir/temp.mkv";
 
-# Now we can call mkvmerge to split the file
-system "mkvmerge -o $temp_dir/split.mkv --split timecodes:$cutlist_sub_str $temp_dir/temp.mkv";
+	# Now we can call mkvmerge to split the file
+	system "mkvmerge -o $temp_dir/split.mkv --split timecodes:$cutlist_sub_str $temp_dir/temp.mkv";
 
-# build the merge string
-if ( $vidstart == 1 ) {
-	$merge_string = "$temp_dir/split-001.mkv";
-} else {
-	$merge_string = "$temp_dir/split-002.mkv";
+	# build the merge string
+	if ( $vidstart == 1 ) {
+		$merge_string = "$temp_dir/split-001.mkv";
+	} else {
+		$merge_string = "$temp_dir/split-002.mkv";
+	}
+	for ( $n=$vidstart+2; $n<=$ctr; $n+=2 ) {
+		print "n: $n\n";
+		$merge_string = $merge_string . " +$temp_dir/split-" . sprintf("%03d",$n) . ".mkv";	
+	}
+	print "merge string: $merge_string\n";
+	# Now merge the proper files
+	system "mkvmerge -o $output_dir/\"$outfile\".mkv $merge_string";
+
+	# Do a little cleanup.
+	system "rm $temp_dir/*";
 }
-for ( $n=$vidstart+2; $n<=$ctr; $n+=2 ) {
-	print "n: $n\n";
-	$merge_string = $merge_string . " +$temp_dir/split-" . sprintf("%03d",$n) . ".mkv";	
-}
-print "merge string: $merge_string\n";
-# Now merge the proper files
-system "mkvmerge -o $output_dir/\"$outfile\".mkv $merge_string";
-
-# Do a little cleanup.
-system "rm $temp_dir/*";

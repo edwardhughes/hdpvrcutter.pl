@@ -56,11 +56,15 @@ use Getopt::Long;
 # Debugging modules
 use Data::Dumper;
 
-my $fps = 29.97;
-
 ################################################################################
 ## Leave everything below this line alone unless you know what you are doing!
 ################################################################################
+
+# Some variables
+my $fps = 29.97;
+my $cutlist_sub_str = "";
+my $ctr = 0;
+my $vidstart;
 
 ## Process command line arguments
 
@@ -95,7 +99,8 @@ usage() if ( @ARGV < 1 or ! GetOptions(
 'recordings=s' => \$recordings_dir,
 'tempdir=s' => \$temp_dir,
 'dest=s' => \$output_dir,
-'help|?' => \$help) );
+'help|?' => \$help)
+);
 
 sub usage
 {
@@ -204,6 +209,13 @@ if ( $direct_db_cutlist ) {
       push(@types,$markup[1]);
     }      
   }
+  foreach my $mark ( @marks ) {
+    $secs = $mark / $fps;
+    $cutlist_sub_str .= sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",floor($secs/60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . ",";
+    $ctr++;
+  }
+  $ctr++;
+  $marks[0] == 0 ? $vidstart = 2 : $vidstart = 1;
 }
 # release the query
 $query->finish;
@@ -539,53 +551,55 @@ if ($subtitle ne "")
   # Begin cutting procedure
   #####
   
-  # Original exec line used a patched version of mythcommflag - instead, I have implemented some simple Javascript in the avidemux project file
-  #exec "mythcommflag --getcutlist-avidemux -f \"$filename\" --outputfile \"$recordings_dir\"/temp.proj;
-  system "mythcommflag --getcutlist -f $filename --very-quiet > $temp_dir/temp.proj";
-  
-  # Now we need to read the cutlist from the file
-  open FILE, "$temp_dir/temp.proj" or die $!;
-  $cutlist_line = <FILE>;
-  close(FILE);
-  # Make sure there is a cutlist or exit with error message
-  if ( $cutlist_line =~ m/Cutlist:\s*$/i ) {
-    print "No cutlist present for selected recording...trying commercial skip list...\n";
-    # now we check for a commercial skip list...
-    system "mythcommflag --getskiplist -f $filename --very-quiet > $temp_dir/temp.proj";
-    # read file, again
+  if ( !$direct_db_cutlist ) {
+    # Original exec line used a patched version of mythcommflag - instead, I have implemented some simple Javascript in the avidemux project file
+    #exec "mythcommflag --getcutlist-avidemux -f \"$filename\" --outputfile \"$recordings_dir\"/temp.proj;
+    system "mythcommflag --getcutlist -f $filename --very-quiet > $temp_dir/temp.proj";
+    
+    # Now we need to read the cutlist from the file
     open FILE, "$temp_dir/temp.proj" or die $!;
     $cutlist_line = <FILE>;
     close(FILE);
-    if ( $cutlist_line =~ m/Commercial Skip List:\w*$/i ) {
-      print "No commercial skip list present either!  Exiting!!\n\n";
-      exit 10;
+    # Make sure there is a cutlist or exit with error message
+    if ( $cutlist_line =~ m/Cutlist:\s*$/i ) {
+      print "No cutlist present for selected recording...trying commercial skip list...\n";
+      # now we check for a commercial skip list...
+      system "mythcommflag --getskiplist -f $filename --very-quiet > $temp_dir/temp.proj";
+      # read file, again
+      open FILE, "$temp_dir/temp.proj" or die $!;
+      $cutlist_line = <FILE>;
+      close(FILE);
+      if ( $cutlist_line =~ m/Commercial Skip List:\w*$/i ) {
+	print "No commercial skip list present either!  Exiting!!\n\n";
+	exit 10;
+      }
+      print "Using commercial skip list.  Results may vary...\n";
+    }	
+    # Now extract the cutlist array
+    $cutlist_line =~ s/[^-0-9,]//g;
+    #$cutlist_line = '"' . $cutlist_line . '"';
+    #$cutlist_line =~ s/,/","/g;
+    print "Cutlist: $cutlist_line\n";
+    # move the addSegment line creation to here...not the tinypy script
+    @cutlist_array = split(',', $cutlist_line);
+    $cutlist_segments = scalar(@cutlist_array);
+    print "There are $cutlist_segments video segments to be spliced.\n";
+    $cutlist_sub_str = "";
+    $fpsmult = 29.97;
+    $ctr=0;
+    for ( $n=0; $n < $cutlist_segments; $n++ ) {
+      $cutlist_array[$n] =~ m/(\d+)-(\d+)/;
+      $comm_start = $1 / $fpsmult;
+      $comm_end = $2 / $fpsmult;
+      $cutlist_sub_str = $cutlist_sub_str . sprintf("%02d",floor($comm_start/3600)) . ":" . sprintf("%02d",floor($comm_start/60)) . ":" . sprintf("%06.3f",fmod($comm_start,60)) . ",";
+      $cutlist_sub_str = $cutlist_sub_str . sprintf("%02d",floor($comm_end/3600)) . ":" . sprintf("%02d",floor($comm_end/60)) . ":" . sprintf("%06.3f",fmod($comm_end,60)) . ",";
+      if ( $n == 1 ) {
+	$comm_start == 0 ? $vidstart = 2 : $vidstart = 1;
+      }
+      $ctr+=2;
     }
-    print "Using commercial skip list.  Results may vary...\n";
-  }	
-  # Now extract the cutlist array
-  $cutlist_line =~ s/[^-0-9,]//g;
-  #$cutlist_line = '"' . $cutlist_line . '"';
-  #$cutlist_line =~ s/,/","/g;
-  print "Cutlist: $cutlist_line\n";
-  # move the addSegment line creation to here...not the tinypy script
-  @cutlist_array = split(',', $cutlist_line);
-  $cutlist_segments = scalar(@cutlist_array);
-  print "There are $cutlist_segments video segments to be spliced.\n";
-  $cutlist_sub_str = "";
-  $fpsmult = 29.97;
-  $ctr=0;
-  for ( $n=0; $n < $cutlist_segments; $n++ ) {
-    $cutlist_array[$n] =~ m/(\d+)-(\d+)/;
-    $comm_start = $1 / $fpsmult;
-    $comm_end = $2 / $fpsmult;
-    $cutlist_sub_str = $cutlist_sub_str . floor($comm_start/3600) . ":" . floor($comm_start/60) . ":" . sprintf("%06.3f",fmod($comm_start,60)) . ",";
-    $cutlist_sub_str = $cutlist_sub_str . floor($comm_end/3600) . ":" . floor($comm_end/60) . ":" . sprintf("%06.3f",fmod($comm_end,60)) . ",";
-    if ( $n == 1 ) {
-      $comm_start == 0 ? $vidstart = 2 : $vidstart = 1;
-    }
-    $ctr+=2;
+    $ctr++;
   }
-  $ctr++;
   print "$cutlist_sub_str\nctr: $ctr\nvidstart: $vidstart\n";
   
   if ( !$dryrun ) {

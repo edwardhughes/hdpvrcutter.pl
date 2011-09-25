@@ -51,12 +51,13 @@ use LWP::UserAgent;
 use DBI;
 use File::Copy;
 use Data::Dumper;
+use POSIX;
  
 ## Set these before using!
  
 $recordings_dir = '/mnt/media/mythtv/recordings/';
 $temp_dir = '/mnt/media/temp/';
-$output_dir = '/mnt/r2d2/MythTV_Exports';
+$output_dir = '/mnt/media/output';
  
 $mysql_host = 'localhost';
 $mysql_db = 'mythconverg';
@@ -459,42 +460,9 @@ if ($subtitle ne "")
 }
 
 #####
-# Start to create the avidemux project file - we will use a template
-#####
-# First, copy the template to the temp directory
-copy("/usr/local/share/mythtv/avidemux.proj.template.py","$temp_dir/avidemux.proj");
-$temp_filename = $filename;
-$temp_filename =~ s/\//\\\//g; # use some regexp to clean the file path by replacing all forward slashes with ???
-#print $temp_filename;
-
-#####
-# Begin placeholder substitution
+# Begin cutting procedure
 #####
 
-# Get total video duration from an ffmpeg call
-system "ffmpeg -i $temp_filename -y /dev/null 2>&1 | grep Duration > $temp_dir/fps.out";
-open FILE, "$temp_dir/fps.out" or die $!;
-$ffmpeg_line = <FILE>;
-#print "\n ffmpeg output: $ffmpeg_line\n";
-close(FILE);
-# make sure the fps string isn't empty, otherwise exit
-if ( length($ffmpeg_line) == 0 ) {
-        exit 2;
-}
-# now a little regexp to extract the duration...
-# (using positive lookbehind)
-if ( $ffmpeg_line =~ m/(?<=Duration:\s)(\d{1,4}):(\d{2}):(\d{2}\.\d{2})/ ) {
-        $duration_HH = $1;
-	$duration_MM = $2;
-	$duration_SS = $3;
-} else {
-        print "Error while trying to determine video FPS.\n";
-        exit 10;
-}
-print "Total file duration: $duration_HH:$duration_MM:$duration_SS\n";
-# Compute the total duration in ms
-$total_duration_ms = ($duration_HH*60*60*1000 + $duration_MM*60*1000 + $duration_SS*1000) * 1000;
- 
 # Original exec line used a patched version of mythcommflag - instead, I have implemented some simple Javascript in the avidemux project file
 #exec "mythcommflag --getcutlist-avidemux -f \"$filename\" --outputfile \"$recordings_dir\"/temp.proj;
 system "mythcommflag --getcutlist -f $filename --very-quiet > $temp_dir/temp.proj";
@@ -528,33 +496,41 @@ print "Cutlist: $cutlist_line\n";
 $cutlist_segments = scalar(@cutlist_array);
 print "There are $cutlist_segments video segments to be spliced.\n";
 $cutlist_sub_str = "";
-$segment_start = 0;
-$fpsmult = 29.97 * 1000;
+$fpsmult = 29.97;
+$ctr=0;
 for ( $n=0; $n < $cutlist_segments; $n++ ) {
 	$cutlist_array[$n] =~ m/(\d+)-(\d+)/;
-	$comm_start = $1;
-	$comm_end = $2;
-	$cutlist_sub_str = $cutlist_sub_str . "app.addSegment(0," . $segment_start*$fpsmult . "," . ($comm_start-$segment_start)*$fpsmult .  ")\\n";
-	$segment_start = $comm_end;
+	$comm_start = $1 / $fpsmult;
+	$comm_end = $2 / $fpsmult;
+	$cutlist_sub_str = $cutlist_sub_str . floor($comm_start/3600) . ":" . floor($comm_start/60) . ":" . $comm_start % 60 . ",";
+	$cutlist_sub_str = $cutlist_sub_str . floor($comm_end/3600) . ":" . floor($comm_end/60) . ":" . $comm_end % 60 . ",";
+	if ( $n == 1 ) {
+		$comm_start == 0 ? $vidstart = 2 : $vidstart = 1;
+	}
+	$ctr+=2;
 }
-$cutlist_sub_str = $cutlist_sub_str . "app.addSegment(0," . $segment_start*$fpsmult . "," . $total_duration_ms . ")\\n";	
-#$cutlist_sub_str = $cutlist_sub_str . "app.markerA=0\\n";
-#$cutlist_sub_str = $cutlist_sub_str . "app.markerB=$total_duration_ms\\n";
+$ctr++;
+print "$cutlist_sub_str\nctr: $ctr\nvidstart: $vidstart\n";
 
-system "sed -i 's/APPADDSEGMENT/$cutlist_sub_str/' $temp_dir/avidemux.proj";
+# First we need to run the MPEG-TS file through ffmpeg to mux it into a Matroska container
+system "ffmpeg -y -i $filename -vcodec copy -acodec copy -f matroska $temp_dir/temp.mkv";
 
-# now replace the APPLOAD placeholder with the appropriate app.load() string
-system "sed -i 's/APPLOAD/app.loadVideo\(\"$temp_filename\"\)/' $temp_dir/avidemux.proj";
-#exit 99;
+# Now we can call mkvmerge to split the file
+system "mkvmerge -o $temp_dir/split.mkv --split timecodes:$cutlist_sub_str $temp_dir/temp.mkv";
 
-# Finally, the call to avidemux
-#system "nice -n 9 avidemux2_cli --force-smart --nogui --run \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.avi\" --quit 2> /dev/null";
-system "nice -n 9 avidemux3_cli --force-alt-h264 --nogui --runpy \"$temp_dir\"/avidemux.proj --save \"$temp_dir\"/\"$outfile\.mkv\" --quit 2> /dev/null";
- 
-# Move the AVI file into a Matroska.  
-# Failure to do this will result in broken seeking.
-#system "mkvmerge -o  \"$output_dir\"/\"$outfile\.mkv\"  \"$temp_dir\"/\"$outfile\.mkv\"";
- 
+# build the merge string
+if ( $vidstart == 1 ) {
+	$merge_string = "$temp_dir/split-001.mkv";
+} else {
+	$merge_string = "$temp_dir/split-002.mkv";
+}
+for ( $n=$vidstart+2; $n<=$ctr; $n+=2 ) {
+	print "n: $n\n";
+	$merge_string = $merge_string . " +$temp_dir/split-" . sprintf("%03d",$n) . ".mkv";	
+}
+print "merge string: $merge_string\n";
+# Now merge the proper files
+system "mkvmerge -o $output_dir/\"$outfile\".mkv $merge_string";
+
 # Do a little cleanup.
-#system "rm $temp_dir/*";
-
+system "rm $temp_dir/*";

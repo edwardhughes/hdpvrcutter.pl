@@ -50,49 +50,97 @@
 use LWP::UserAgent;
 use DBI;
 use File::Copy;
-use Data::Dumper;
 use POSIX;
- 
+use Getopt::Long;
+
+# Debugging modules
+use Data::Dumper;
+
 ## Set these before using!
  
-$recordings_dir = '/mnt/media/mythtv/recordings/';
-$temp_dir = '/mnt/media/temp/';
-$output_dir = '/mnt/media/output';
+# $recordings_dir = '/mnt/media/mythtv/recordings/';
+# $temp_dir = '/mnt/media/temp/';
+# $output_dir = '/mnt/media/output';
+#  
+# $mysql_host = 'localhost';
+# $mysql_db = 'mythconverg';
+# $mysql_user = 'mythtv';
+# $mysql_password = 'mythtvIV';
  
-$mysql_host = 'localhost';
-$mysql_db = 'mythconverg';
-$mysql_user = 'mythtv';
-$mysql_password = 'mythtvIV';
- 
+################################################################################
 ## Leave everything below this line alone unless you know what you are doing!
+################################################################################
 
-print Dumper(@ARGV) . "\n";
+## Process command line arguments
 
-@pname = "";
-@subt = "";
-$subtFlag = 0;
-INPUTARG:
-foreach (@ARGV) {
-	print $_ . "\n";
-	if ( $_ eq '----' ) {
-		$subtFlag = 1;
-		print "Changing to subtitle...\n";
-		next INPUTARG;
-	}
-	if ( !$subtFlag ) {
-		push(@pname,$_);
-	} else {
-		push(@subt,$_);
-	}
+# Delcare variables with default values
+my $verbose = '';
+my $dryrun = '';
+my $title = '';
+my $subtitle = '';
+my $mysql_host = 'localhost';
+my $mysql_db = 'mythconverg';
+my $mysql_user = 'mythtv';
+my $mysql_password = '';
+my $recordings_dir = '';
+my $temp_dir = '';
+my $output_dir = '';
+my $help = '';
+
+# Print the help if requested or no arguments are used
+usage() if ( @ARGV < 1 or ! GetOptions( 'verbose' => \$verbose,
+	    'dryrun' => \$dryrun,
+	    'title=s' => \$title,
+	    'subtitle=s' => \$subtitle,
+	    'host=s' => \$mysql_host,
+	    'dbname=s' => \$mysql_db,
+	    'user=s' => \$mysql_user,
+	    'passwd=s' => \$mysql_password,
+	    'recordings=s' => \$recordings_dir,
+	    'tempdir=s' => \$temp_dir,
+	    'dest=s' => \$output_dir,
+	    'help|?' => \$help) );
+
+sub usage
+{
+  print "Unknown option: @_\n" if ( @_ );
+  print "usage: hdpvrcutter.pl --passwd=PASSWORD --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR --title=TITLE --subtitle=SUBTITLE [--verbose] [--dryrun] [--host=HOSTNAME] [--dbname=DBNAME] [--user=USER] [--help|-?]\n";
+  exit;
 }
 
-$progname = join(" ",@pname);
-$subtitle = join(" ",@subt);
-# Trim whitespace
-$progname =~ s/^\s+//;
-$progname =~ s/\s+$//;
-$subtitle =~ s/^\s+//;
-$subtitle =~ s/\s+$//;
+# Checks and error messages for required flags
+!$mysql_password ? print "Must supply the password for the MySQL MythTV database [--passwd=PASSWORD] .\n" : 0;
+!$recordings_dir ? print "Must supply the full path to the MythTV recordings directory [--recordings=RECORDINGS_DIR].\n" : 0;
+!$temp_dir ? print "Must supply the full path the the temporary working directory [--tempdir=TEMPORARY_DIR].\n" : 0;
+!$output_dir ? print "Must supply the full the path the to output destination directory [--dest=DESTINATION_DIR].\n" : 0;
+!$title ? print "How can you export a show without a title?  [--title=TITLE]\n" : 0;
+!$subtitle ? print "You need a subtitle to specify the exact show to export. [--subtitle=SUBTITLE]\n" : 0;
+
+# Exit if not all of the required parameters are supplied
+if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !$title or !$subtitle ) {
+  exit;
+}
+
+# Let's print some feedback about the supplied arguments
+print "Here's what I understand we'll be doing:\n";
+print "I'll be accessing the $mysql_db database on the host '$mysql_host' as the user '$mysql_user' (I'm not going to show you the password)\n";
+print "I'll then export the recording: $title - $subtitle\n";
+$dryrun ? print "...and I won't actually be exporting anything, just telling you what I would be doing.\n" : 0;
+$verbose ? print "Verbose mode\n" : print "Quiet mode\n";
+
+
+## Proceed with the export
+# Trim whitespace from title(s)
+$progname = $title;
+$progname =~ s/^\s+//; # leading
+$progname =~ s/\s+$//; # trailing
+$subtitle =~ s/^\s+//; # leading
+$subtitle =~ s/\s+$//; # trailing
+
+# Add a trailing forward slash to the directories to be safe
+$recordings_dir .= '/';
+$temp_dir .= '/';
+$output_dir .= '/';
  
 $apikey = "259FD33BA7C03A14";
 $THETVDB = "www.thetvdb.com";
@@ -104,8 +152,6 @@ print "Subtitle: $subtitle\n";
 $progname =~ s/\'/\\'/g; # SQL doesn't like apostrophes
 $subtitle =~ s /\'/\\'/g;
 
-# Old MySQL data retrieval method
-#$fileinfo = `mysql -h $mysql_host -D $mysql_db -u $mysql_user --password=$mysql_password -r -s --skip-column-names -e \"select chanid,starttime,endtime,originalairdate from recorded where title like \'$progname\' and subtitle like \'$subtitle\'\" | head -n 1`;
 
 # Let's use perl's DBI module to access the database
 # Connect to MySQL database

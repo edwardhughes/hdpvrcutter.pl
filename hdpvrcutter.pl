@@ -31,19 +31,23 @@
 #
 #    hdpvrcutter %TITLE% ---- %SUBTITLE% 
 #
-
+### Version 0.5 - 2011/09/25
+#   - Changed command line arguments to a much more intuitive usage
+#   - Added method to directly call database for cutlist/skiplist retrieval instead of using mythcommflag
+#   - Using 'mkvmerge --split' instead of avidemux3_cli with better, although still-far-from-perfect - results
+#
 ### Version 0.4 - 2011/06/19
 #   - Added frame rate detection through use of ffmpeg system call
 #   - Added additional error handling and fallback to commercial skip-list if no cutlist is found
-
+#
 ### Version 0.3 - 2011/03/16
 #   - Removed dependency on mythcommflag patch.
 #   - Use perl DBI interface for MySQL queries
 #   - Hack used to properly parse input arguments
-
+#
 ### Version 0.2 - 5/30/09
 #   - Strip apostrophes when querying TVDB
-
+#
 ### VERSION 0.1
 #   - Initial release
 
@@ -65,6 +69,7 @@ my $fps = 29.97;
 my $cutlist_sub_str = "";
 my $ctr = 0;
 my $vidstart;
+my $now = time();
 
 ## Process command line arguments
 
@@ -74,6 +79,7 @@ my $debug = '';
 my $dryrun = 0;
 my $direct_db_cutlist = '';
 my $title = '';
+my $searchtitle = '';
 my $subtitle = '';
 my $mysql_host = 'localhost';
 my $mysql_db = 'mythconverg';
@@ -91,6 +97,7 @@ usage() if ( @ARGV < 1 or ! GetOptions(
 'dryrun' => \$dryrun,
 'direct-db-cutlist' => \$direct_db_cutlist,
 'title=s' => \$title,
+'searchtitle=s' => \$searchtitle,
 'subtitle=s' => \$subtitle,
 'host=s' => \$mysql_host,
 'dbname=s' => \$mysql_db,
@@ -105,17 +112,17 @@ usage() if ( @ARGV < 1 or ! GetOptions(
 sub usage
 {
   print "Unknown option: @_\n" if ( @_ );
-  print "usage: hdpvrcutter.pl --passwd=PASSWORD --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR --title=TITLE --subtitle=SUBTITLE [--verbose] [--debug] [--dryrun] [--direct-db-cutlist] [--host=HOSTNAME] [--dbname=DBNAME] [--user=USER] [--help|-?]\n";
+  print "usage: hdpvrcutter.pl --passwd=PASSWORD --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR --title=TITLE --subtitle=SUBTITLE [--verbose] [--debug] [--dryrun] [--direct-db-cutlist] [--host=HOSTNAME] [--dbname=DBNAME] [--user=USER] [--searchtitle SEARCH_TITLE] [--help|-?]\n";
   exit;
 }
 
 # Checks and error messages for required flags
-!$mysql_password ? print "Must supply the password for the MySQL MythTV database [--passwd=PASSWORD] .\n" : 0;
-!$recordings_dir ? print "Must supply the full path to the MythTV recordings directory [--recordings=RECORDINGS_DIR].\n" : 0;
-!$temp_dir ? print "Must supply the full path the the temporary working directory [--tempdir=TEMPORARY_DIR].\n" : 0;
-!$output_dir ? print "Must supply the full the path the to output destination directory [--dest=DESTINATION_DIR].\n" : 0;
-!$title ? print "How can you export a show without a title?  [--title=TITLE]\n" : 0;
-!$subtitle ? print "You need a subtitle to specify the exact show to export. [--subtitle=SUBTITLE]\n" : 0;
+print "Must supply the password for the MySQL MythTV database [--passwd=PASSWORD] .\n" if ( !$mysql_password );
+print "Must supply the full path to the MythTV recordings directory [--recordings=RECORDINGS_DIR].\n" if ( !$recordings_dir );
+print "Must supply the full path the the temporary working directory [--tempdir=TEMPORARY_DIR].\n" if ( !$temp_dir );
+print "Must supply the full the path the to output destination directory [--dest=DESTINATION_DIR].\n" if ( !$output_dir );
+print "How can you export a show without a title?  [--title=TITLE]\n" if ( !$title );
+print "You need a subtitle to specify the exact show to export. [--subtitle=SUBTITLE]\n" if ( !$subtitle );
 
 # Exit if not all of the required parameters are supplied
 if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !$title or !$subtitle ) {
@@ -124,10 +131,11 @@ if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !$tit
 
 # Let's print some feedback about the supplied arguments
 print "Here's what I understand we'll be doing:\n";
-print "I'll be accessing the '$mysql_db' database on the host '$mysql_host' as the user '$mysql_user' (I'm not going to show you the password)\n";
+print "I'll be accessing the '$mysql_db' database on the host '$mysql_host'\n\tas the user '$mysql_user' (I'm not going to show you the password)\n";
 print "I'll then export the recording: $title - $subtitle\n";
-$direct_db_cutlist ? print "\n***** I will be accessing the database directly to obtain the cutlist, instead of calling mythcommflag.  THIS IS EXPERIMENTAL! *****\n\n" : 0;
-$dryrun ? print "***** DRY RUN.  WILL NOT PRODUCE ANY OUTPUT FILES. *****\n\n" : 0;
+print "Oh yeah, I'll be using the search string '$searchtitle'\n\tfor the tvdb query instead of '$title'.\n" if ( $searchtitle );
+print "\n***** DIRECT DB ACCESS FOR CUTLIST/SKIPLIST RETRIEVAL.  NOT AS RELIABLE AS 'mythcommflag'! *****\n\n" if ( $direct_db_cutlist );
+print "***** DRY RUN.  WILL NOT PRODUCE ANY OUTPUT FILES. *****\n\n" if ( $dryrun );
 if ( $debug ) {
   $debug = 2;
 } else {
@@ -226,6 +234,7 @@ if ( !@infoparts or length($infoparts[0]) == 0 or length($infoparts[1]) == 0 ) {
   exit 1;  # We'll exit with a non-zero exit code.  The '1' has no significance at this time.
 }
 
+$progname = $searchtitle if ( $searchtitle );
 $progname =~ s/\\'//g; # TVDB doesn't like apostrophes either
 $subtitle =~ s/\\'//g;
 
@@ -600,30 +609,35 @@ if ($subtitle ne "")
     }
     $ctr++;
   }
-  print "$cutlist_sub_str\nctr: $ctr\nvidstart: $vidstart\n";
+  if ( $cutlist_sub_str eq "" ) {
+    print "There seems to be no cutlist or skiplist present for this recording.\n";
+    exit;
+  } else {
+    print "mkvmerge timecodes: $cutlist_sub_str\nctr: $ctr\nvidstart: $vidstart\n";
+  }
   
   if ( !$dryrun ) {
     # First we need to run the MPEG-TS file through ffmpeg to mux it into a Matroska container
-    system "ffmpeg -y -i $filename -vcodec copy -acodec copy -f matroska $temp_dir/temp.mkv";
+    system "ffmpeg -y -i $filename -vcodec copy -acodec copy -f matroska $temp_dir/temp_$now.mkv";
     
     # Now we can call mkvmerge to split the file
-    system "mkvmerge -o $temp_dir/split.mkv --split timecodes:$cutlist_sub_str $temp_dir/temp.mkv";
+    system "mkvmerge -o $temp_dir/split_$now.mkv --split timecodes:$cutlist_sub_str $temp_dir/temp_$now.mkv";
     
     # build the merge string
     if ( $vidstart == 1 ) {
-      $merge_string = "$temp_dir/split-001.mkv";
+      $merge_string = "$temp_dir/split_$now-001.mkv";
     } else {
-      $merge_string = "$temp_dir/split-002.mkv";
+      $merge_string = "$temp_dir/split_$now-002.mkv";
     }
     for ( $n=$vidstart+2; $n<=$ctr; $n+=2 ) {
       print "n: $n\n";
-      $merge_string = $merge_string . " +$temp_dir/split-" . sprintf("%03d",$n) . ".mkv";	
+      $merge_string = $merge_string . " +$temp_dir/split_$now-" . sprintf("%03d",$n) . ".mkv";	
     }
     print "merge string: $merge_string\n";
     # Now merge the proper files
     system "mkvmerge -o $output_dir/\"$outfile\".mkv $merge_string";
     
     # Do a little cleanup.
-    system "rm $temp_dir/*";
+    system "rm $temp_dir/*$now*";
   }
   

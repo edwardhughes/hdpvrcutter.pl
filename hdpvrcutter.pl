@@ -68,6 +68,9 @@ use Data::Dumper;
 ## Leave everything below this line alone unless you know what you are doing!
 ################################################################################
 
+#First setup the sigint handler
+use sigtrap 'handler' => \&sigint_exit, 'INT';
+
 # Some variables
 my $fps = 29.97;
 my $cutlist_sub_str = "";
@@ -324,20 +327,17 @@ if ( !$direct_db_cutlist ) {
     $cutlist_line = <FILE>;
     close(FILE);
     if ( $cutlist_line =~ m/Commercial Skip List:\w*$/i ) {
-      print "No commercial skip list present either!  EXITING!!\n\n";
+      print "No commercial skip list present either!  Exiting...\n";
       exit 10;
     }
     print "Using commercial skip list.  Results may vary...\n";
   }	
   # Now extract the cutlist array
   $cutlist_line =~ s/[^-0-9,]//g;
-  #$cutlist_line = '"' . $cutlist_line . '"';
-  #$cutlist_line =~ s/,/","/g;
-  print "Cutlist: $cutlist_line\n";
-  # move the addSegment line creation to here...not the tinypy script
+  print "Cutlist: $cutlist_line\n" if ( $debug > 1 );
   @cutlist_array = split(',', $cutlist_line);
   $cutlist_segments = scalar(@cutlist_array);
-  print "There are $cutlist_segments video segments to be spliced.\n";
+  print "There are $cutlist_segments video segments to be spliced.\n" if ( $debug >= 1 );
   $cutlist_sub_str = "";
   $ctr=0;
   for ( $n=0; $n < $cutlist_segments; $n++ ) {
@@ -391,8 +391,8 @@ if ( !$dryrun ) {
   # Now merge the proper files
   system "mkvmerge -o $output_dir/\"$outfile\".mkv $merge_string";
   
-  # Do a little cleanup (don't if debug mode is in use)
-  system "rm $temp_dir/*$now*" if ( $debug <= 1 );
+  # cleanup
+  cleanup_temp();
 }
 
 # Clean exit
@@ -404,6 +404,18 @@ exit 0;
 #####
 # Begin sub-functions
 #####
+
+# Most important -> ctrl-c trap to exit cleanly
+sub sigint_exit {
+  print "\n\nCaught Ctrl-c interrupt! Exiting...\n\n";
+  cleanup_temp();
+  exit 99;
+}
+
+sub cleanup_temp {
+  # Do a little cleanup (don't if debug mode is in use)
+  system "rm $temp_dir/*$now*" if ( $debug <= 1 );  
+}
 
 sub get_http_response_lwp
 {

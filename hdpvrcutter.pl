@@ -27,9 +27,8 @@
 #    Working MythTV setup (To steal the cutlist from)
 #    MKVtoolnix (to fix indexing and drop into an MKV)
 #
-# Basic user job setup is:
+# Type hdpvrcutter.pl --help for usage information.
 #
-#    hdpvrcutter %TITLE% ---- %SUBTITLE% 
 #
 ### Version 0.5 - 2011/09/25
 #   - Changed command line arguments to a much more intuitive usage
@@ -51,6 +50,10 @@
 #
 ### VERSION 0.1
 #   - Initial release
+#
+#
+#
+# @todo: define exit codes
 
 use LWP::UserAgent;
 use DBI;
@@ -189,6 +192,12 @@ $debug > 1 ? print "Infoparts: " . Dumper(@infoparts) . "\n" : 0;
 $chanid = $infoparts[0];
 $starttime = $infoparts[1];
 
+# Let's make sure that the response is not empty
+if ( !@infoparts or length($infoparts[0]) == 0 or length($infoparts[1]) == 0 ) {
+  print "Indicated program does not exist in the mythconverg.recorded table.\nPlease check your inputs and try again.\nExiting...\n";
+  exit 1;  # We'll exit with a non-zero exit code.  The '1' has no significance at this time.
+}
+
 # Experimental cutlist retrieval directly from database
 if ( $direct_db_cutlist ) {
   # We want a cutlist if available (it is user created), so we'll query for that first.
@@ -205,7 +214,7 @@ if ( $direct_db_cutlist ) {
     push(@marks,$markup[0]);
     push(@types,$markup[1]);
   }
-  # A cutlist wasn't present.  Now we can query for a commercial skip list.
+  # A cutlist was not found.  Let's query for a commercial skip list.
   if ( !@marks ) {
     $query_str = "SELECT mark,type FROM recordedmarkup WHERE chanid=? AND starttime=? AND ( type=4 OR type=5 ) ORDER BY mark ASC";
     print "Direct skiplist query string: $query_str\n" if ( $debug > 1 );
@@ -217,6 +226,10 @@ if ( $direct_db_cutlist ) {
       push(@marks,$markup[0]);
       push(@types,$markup[1]);
     }      
+  }
+  if ( !@marks ) {
+    print "No cutlist or commercial skiplist found for specified recording.\nPlease check your inputs and/or create a cutlist then try again.  Exiting...\n";
+    exit 1;
   }
   foreach my $mark ( @marks ) {
     $secs = $mark / $fps;
@@ -237,13 +250,10 @@ $query->finish;
 # disconnect from the database
 $dbh->disconnect();
 
-# Let's make sure that the response is not empty
-if ( !@infoparts or length($infoparts[0]) == 0 or length($infoparts[1]) == 0 ) {
-  print "Empty response from database...exiting!\n";
-  exit 1;  # We'll exit with a non-zero exit code.  The '1' has no significance at this time.
-}
-
+# Be sure to override the MythTV program name with the alternate search-title, if supplied
 $progname = $searchtitle if ( $searchtitle );
+
+# cleanup for tvdb query
 $progname =~ s/\\'//g; # TVDB doesn't like apostrophes either
 $subtitle =~ s/\\'//g;
 
@@ -266,17 +276,21 @@ if ( length($originalairdate) > 0 and length($recordedairdate) > 0 ) {
   print "Original airdate: $originalairdate\n" if ( $debug >= 1 );
   print "Recorded Date: $recordedairdate\n" if ( $debug >= 1 );
 } else {
-  print "Zero length query strings for thetvdb.com...exiting!\n";
-  exit 1; # Same here...the '1' indicates exit with error without specifics
+  print "Zero length query strings for thetvdb.com. Exiting...\n";
+  exit 1;
 }
 
 $airdate = $originalairdate ne '0000-00-00' ? $originalairdate : $recordedairdate;
+
+#####
+# Query thetvdb.com for program information
+#####
 
 @T = parse_episode_content($progname);
 $S = $T[0];
 $E = $T[1];
 if ( length($S) == 0 or length($E) == 0 ) {
-  print "Empty season or episode number returned from thetvdb.com...exiting!\n";
+  print "Empty season or episode number returned from thetvdb.com.  Exiting...\n";
   exit 1;
 }
 # Print some useful information
@@ -293,7 +307,7 @@ $outfile = "$progname.S${S}E${E}";
 if ( !$direct_db_cutlist ) {
   # Original exec line used a patched version of mythcommflag - instead, I have implemented some simple Javascript in the avidemux project file
   #exec "mythcommflag --getcutlist-avidemux -f \"$filename\" --outputfile \"$recordings_dir\"/temp.proj;
-  print "Calling mythcommflag to get cutlist/skiplist";
+  print "Calling mythcommflag to get cutlist/skiplist\n";
   system "mythcommflag --getcutlist -f $filename --very-quiet > $temp_dir/temp.proj";
   
   # Now we need to read the cutlist from the file
@@ -325,12 +339,11 @@ if ( !$direct_db_cutlist ) {
   $cutlist_segments = scalar(@cutlist_array);
   print "There are $cutlist_segments video segments to be spliced.\n";
   $cutlist_sub_str = "";
-  $fpsmult = 29.97;
   $ctr=0;
   for ( $n=0; $n < $cutlist_segments; $n++ ) {
     $cutlist_array[$n] =~ m/(\d+)-(\d+)/;
-    $comm_start = $1 / $fpsmult;
-    $comm_end = $2 / $fpsmult;
+    $comm_start = $1 / $fps;
+    $comm_end = $2 / $fps;
     $cutlist_sub_str = $cutlist_sub_str . sprintf("%02d",floor($comm_start/3600)) . ":" . sprintf("%02d",floor($comm_start/60)) . ":" . sprintf("%06.3f",fmod($comm_start,60)) . ",";
     $cutlist_sub_str = $cutlist_sub_str . sprintf("%02d",floor($comm_end/3600)) . ":" . sprintf("%02d",floor($comm_end/60)) . ":" . sprintf("%06.3f",fmod($comm_end,60)) . ",";
     if ( $n == 1 ) {

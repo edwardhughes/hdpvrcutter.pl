@@ -35,6 +35,7 @@
 #   - Changed command line arguments to a much more intuitive usage
 #   - Added method to directly call database for cutlist/skiplist retrieval instead of using mythcommflag
 #   - Using 'mkvmerge --split' instead of avidemux3_cli with better, although still-far-from-perfect - results
+#   - Added flag to allow for alternate title string to be used with tvdb search
 #
 ### Version 0.4 - 2011/06/19
 #   - Added frame rate detection through use of ffmpeg system call
@@ -133,7 +134,7 @@ if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !$tit
 print "Here's what I understand we'll be doing:\n";
 print "I'll be accessing the '$mysql_db' database on the host '$mysql_host'\n\tas the user '$mysql_user' (I'm not going to show you the password)\n";
 print "I'll then export the recording: $title - $subtitle\n";
-print "Oh yeah, I'll be using the search string '$searchtitle'\n\tfor the tvdb query instead of '$title'.\n" if ( $searchtitle );
+print "One more thing...I'll be using the search string '$searchtitle'\n\tfor the tvdb query instead of '$title'.\n" if ( $searchtitle );
 print "\n***** DIRECT DB ACCESS FOR CUTLIST/SKIPLIST RETRIEVAL.  NOT AS RELIABLE AS 'mythcommflag'! *****\n\n" if ( $direct_db_cutlist );
 print "***** DRY RUN.  WILL NOT PRODUCE ANY OUTPUT FILES. *****\n\n" if ( $dryrun );
 if ( $debug ) {
@@ -200,19 +201,19 @@ if ( $direct_db_cutlist ) {
   my $secs;
   while ( @markup = $query->fetchrow_array() ) {
     $secs = $markup[0] / $fps;
-    $debug > 1 ? print "\tmark: $markup[0] (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",floor($secs/60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" : 0;
+    print "\tmark: $markup[0] (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",floor($secs/60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" if ( $debug >= 1 );
     push(@marks,$markup[0]);
     push(@types,$markup[1]);
   }
   # A cutlist wasn't present.  Now we can query for a commercial skip list.
   if ( !@marks ) {
     $query_str = "SELECT mark,type FROM recordedmarkup WHERE chanid=? AND starttime=? AND ( type=4 OR type=5 ) ORDER BY mark ASC";
-    $debug > 1 ? print "Direct skiplist query string: $query_str\n" : 0;
+    print "Direct skiplist query string: $query_str\n" if ( $debug > 1 );
     $query = $dbh->prepare($query_str) or die "Couldn't prepare statement: " . $dbh->errstr;
     $query->execute($chanid,$starttime);
     while ( @markup = $query->fetchrow_array() ) {
       $secs = $markup[0] / $fps;
-      $debug > 1 ? print "\tmark: $markup[0] (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",floor($secs/60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" : 0;
+      print "\tmark: $markup[0] (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",floor($secs/60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" if ( $debug >= 1 );
       push(@marks,$markup[0]);
       push(@types,$markup[1]);
     }      
@@ -223,10 +224,18 @@ if ( $direct_db_cutlist ) {
     $ctr++;
   }
   $ctr++;
-  $marks[0] == 0 ? $vidstart = 2 : $vidstart = 1;
+  print "marks[0]: $marks[0]\n" if ( $debug > 1 );
+  # We need to make sure that the first cut point is a cut-start, not a cut-end
+  if ( $marks[0] == 0 or $types[0] == 0 or $types[0] == 5 ) {
+    $vidstart = 2;
+  } else {
+    $vidstart = 1;
+  }
 }
 # release the query
 $query->finish;
+# disconnect from the database
+$dbh->disconnect();
 
 # Let's make sure that the response is not empty
 if ( !@infoparts or length($infoparts[0]) == 0 or length($infoparts[1]) == 0 ) {
@@ -250,52 +259,143 @@ $filename = "$recordings_dir" . $filename;
 print "Recording Filename: $filename\n";
 
 $originalairdate = $infoparts[3];
-#chop $originalairdate;
-$date1 = $infoparts[1];
-#print "$date1";
-@date2=split /\s+/, "$date1";
-$date3 = $date2[0];
+@date_array = split /\s+/, "$infoparts[1]";
+$recordedairdate = $date_array[0];
 
-#print "@date2[0] \n";
-#print "$date3\n";
-
-
-##### before we destroy the statement handle, let's use MySQL to query the cut-list/skip-list
-#$query_str = "SELECT cutlist FROM recorded WHERE chanid=$chanid AND starttime=$starttime";
-#$query = $dbh->prepare($query_str);
-#$query->execute || Die "Unable to query recorded table\n";
-#$querydata = $query->fetchrow_hashref;
-
-
-##### now destroy the MySQL handle
-# destroy the statement handle
-$query->finish();
-# disconnect from the database
-$dbh->disconnect();
-
-
-if ( length($originalairdate) > 0 and length($date3) > 0 ) {
-  $debug >= 1 ? print "Original airdate: $originalairdate\n" : 0;
-  $debug >= 1 ? print "Recorded Date: $date3\n" : 0;
+if ( length($originalairdate) > 0 and length($recordedairdate) > 0 ) {
+  print "Original airdate: $originalairdate\n" if ( $debug >= 1 );
+  print "Recorded Date: $recordedairdate\n" if ( $debug >= 1 );
 } else {
   print "Zero length query strings for thetvdb.com...exiting!\n";
   exit 1; # Same here...the '1' indicates exit with error without specifics
 }
-#exit;
 
-if ($originalairdate ne '0000-00-00')
-{
-  $airdate = $originalairdate;
+$airdate = $originalairdate ne '0000-00-00' ? $originalairdate : $recordedairdate;
+
+@T = parse_episode_content($progname);
+$S = $T[0];
+$E = $T[1];
+if ( length($S) == 0 or length($E) == 0 ) {
+  print "Empty season or episode number returned from thetvdb.com...exiting!\n";
+  exit 1;
 }
-else
-{
-  $airdate = "$date3";
+# Print some useful information
+print "\tSeason Number: $S\n";
+print "\tEpisode Number: $E\n";
+
+# Generate the output filename
+$outfile = "$progname.S${S}E${E}";
+
+#####
+# Begin cutting procedure
+#####
+
+if ( !$direct_db_cutlist ) {
+  # Original exec line used a patched version of mythcommflag - instead, I have implemented some simple Javascript in the avidemux project file
+  #exec "mythcommflag --getcutlist-avidemux -f \"$filename\" --outputfile \"$recordings_dir\"/temp.proj;
+  print "Calling mythcommflag to get cutlist/skiplist";
+  system "mythcommflag --getcutlist -f $filename --very-quiet > $temp_dir/temp.proj";
+  
+  # Now we need to read the cutlist from the file
+  open FILE, "$temp_dir/temp.proj" or die $!;
+  $cutlist_line = <FILE>;
+  close(FILE);
+  # Make sure there is a cutlist or exit with error message
+  if ( $cutlist_line =~ m/Cutlist:\s*$/i ) {
+    print "No cutlist present for selected recording...trying commercial skip list...\n";
+    # now we check for a commercial skip list...
+    system "mythcommflag --getskiplist -f $filename --very-quiet > $temp_dir/temp.proj";
+    # read file, again
+    open FILE, "$temp_dir/temp.proj" or die $!;
+    $cutlist_line = <FILE>;
+    close(FILE);
+    if ( $cutlist_line =~ m/Commercial Skip List:\w*$/i ) {
+      print "No commercial skip list present either!  EXITING!!\n\n";
+      exit 10;
+    }
+    print "Using commercial skip list.  Results may vary...\n";
+  }	
+  # Now extract the cutlist array
+  $cutlist_line =~ s/[^-0-9,]//g;
+  #$cutlist_line = '"' . $cutlist_line . '"';
+  #$cutlist_line =~ s/,/","/g;
+  print "Cutlist: $cutlist_line\n";
+  # move the addSegment line creation to here...not the tinypy script
+  @cutlist_array = split(',', $cutlist_line);
+  $cutlist_segments = scalar(@cutlist_array);
+  print "There are $cutlist_segments video segments to be spliced.\n";
+  $cutlist_sub_str = "";
+  $fpsmult = 29.97;
+  $ctr=0;
+  for ( $n=0; $n < $cutlist_segments; $n++ ) {
+    $cutlist_array[$n] =~ m/(\d+)-(\d+)/;
+    $comm_start = $1 / $fpsmult;
+    $comm_end = $2 / $fpsmult;
+    $cutlist_sub_str = $cutlist_sub_str . sprintf("%02d",floor($comm_start/3600)) . ":" . sprintf("%02d",floor($comm_start/60)) . ":" . sprintf("%06.3f",fmod($comm_start,60)) . ",";
+    $cutlist_sub_str = $cutlist_sub_str . sprintf("%02d",floor($comm_end/3600)) . ":" . sprintf("%02d",floor($comm_end/60)) . ":" . sprintf("%06.3f",fmod($comm_end,60)) . ",";
+    if ( $n == 1 ) {
+      $comm_start == 0 ? $vidstart = 2 : $vidstart = 1;
+    }
+    $ctr+=2;
+  }
+  $ctr++;
 }
+
+# Some error checking to ensure that we actually have a cutlist before proceding with the system calls
+if ( $cutlist_sub_str eq "" ) {
+  print "There seems to be no cutlist or skiplist present for this recording. EXITING!!!\n";
+  exit;
+} else {
+  print "mkvmerge timecodes: $cutlist_sub_str\n" if ( $debug >= 1 );
+  print "\tctr: $ctr\n\tvidstart: $vidstart\n" if ( $debug > 1 );
+}
+
+if ( !$dryrun ) {
+  # First we need to run the MPEG-TS file through ffmpeg to mux it into a Matroska container
+  my $ffmpeg_string = "ffmpeg -y -i $filename -vcodec copy -acodec copy -f matroska $temp_dir/temp_$now.mkv";
+  print "Calling ffmpeg to repackage video file into Matroska (mkv) container.\n" if ( $debug >= 1 );
+  print "ffmpeg call: $ffmpeg_string\n" if ( $debug > 1 );
+  system $ffmpeg_string;
+  
+  # Now we can call mkvmerge to split the file
+  my $split_string = "mkvmerge -o $temp_dir/split_$now.mkv --split timecodes:$cutlist_sub_str $temp_dir/temp_$now.mkv";
+  print "Calling mkvmerge to split video file.\n" if ( $debug >= 1 );
+  print "mkvmerge split call: $split_string\n" if ( $debug > 1 );
+  system $split_string;
+  
+  # build the merge string
+  if ( $vidstart == 1 ) {
+    $merge_string = "$temp_dir/split_$now-001.mkv";
+  } else {
+    $merge_string = "$temp_dir/split_$now-002.mkv";
+  }
+  for ( $n=$vidstart+2; $n<=$ctr; $n+=2 ) {
+    print "n: $n\n" if ( $debug > 1 );
+    $merge_string = $merge_string . " +$temp_dir/split_$now-" . sprintf("%03d",$n) . ".mkv";	
+  }
+  print "Calling mkvmerge to re-join the cut video files.\n" if ( $debug >= 1 );
+  print "mkvmerge merge string: $merge_string\n" if ( $debug > 1 );
+  # Now merge the proper files
+  system "mkvmerge -o $output_dir/\"$outfile\".mkv $merge_string";
+  
+  # Do a little cleanup (don't if debug mode is in use)
+  system "rm $temp_dir/*$now*" if ( $debug <= 1 );
+}
+
+# Clean exit
+exit 0;
+
+#################### END OF PROGRAM ####################
+
+
+#####
+# Begin sub-functions
+#####
 
 sub get_http_response_lwp
 {
   my $request_url = $_[0];
-  $debug >= 1 ? print "About to call GET HTTP url: '$request_url'\n" : 0;
+  print "About to call GET HTTP url: '$request_url'\n" if ( $debug >= 1 );
   my $req = HTTP::Request->new(GET => $request_url);
   
   # Pass request to the user agent and get a response back
@@ -305,8 +405,8 @@ sub get_http_response_lwp
   if ($res->is_success)
   {
     my $response_content = $res->content;
-    $debug >= 1 ? print "Got HTTP response.\n" : 0;
-    $debug > 1 ? print "$response_content\n" : 0;
+    print "Got HTTP response.\n" if ( $debug >= 1 );
+    print "$response_content\n" if ( $debug > 1 );
     return $response_content;
   }
   else
@@ -450,21 +550,21 @@ sub search_the_tv_db_for_series
   #while ($scontent =~ m/<seriesid>(.+?)<\/seriesid>.*?<seriesname>(.+?)<\/seriesname>.*?<banner>(.+?)<\/banner>.*?<overview>(.+?)<\/overview>/gi)
   while ($scontent =~ m/<series>.*?<seriesid>(.+?)<\/seriesid>.*?<seriesname>(.+?)<\/seriesname>(.+?)<\/series>/gi)
   {
-    $debug > 1 ? print "Loop: $while_ctr\n" : 0;
+    print "Loop: $while_ctr\n" if ( $debug > 1 );
     my $temp_series_id = $1;
     my $temp_series_name = $2;
     my $current_similarity = levenshtein($series, $temp_series_name);
-    $debug > 1 ? print "++++++++++++++++++++++++++++++++++++++++++\n" : 0;
-    $debug > 1 ? print "Best similarity: $best_similarity Current: $current_similarity\n" : 0;
+    print "++++++++++++++++++++++++++++++++++++++++++\n" if ( $debug > 1 );
+    print "Best similarity: $best_similarity Current: $current_similarity\n" if ( $debug > 1 );
     if ( ($current_similarity < $best_similarity) and !(exists {map { $_ => 1 } @bad_series_array}->{$temp_series_id}) )
     {
       if ($series_id eq "")
       {
-	$debug >= 1 ? print "Found a possible match for '$series' as '$temp_series_name' (ID $temp_series_id)\n" : 0;
+	print "Found a possible match for '$series' as '$temp_series_name' (ID $temp_series_id)\n" if ( $debug >= 1 );
       }
       else
       {
-	$debug >= 1 ? print "Found a better possible match for '$series' as '$temp_series_name' (ID $temp_series_id)\n" : 0;
+	print "Found a better possible match for '$series' as '$temp_series_name' (ID $temp_series_id)\n" if ( $debug >= 1 );
       }
       $best_similarity = $current_similarity;
       $series_id = $1;
@@ -476,7 +576,7 @@ sub search_the_tv_db_for_series
 			if ($rest_of_the_data =~ m/<overview>(.+?)<\/overview>/i){$plot = $1;}
 			else {$plot = "";}
     }
-    $debug > 1 ? print "++++++++++++++++++++++++++++++++++++++++++\n": 0;
+    print "++++++++++++++++++++++++++++++++++++++++++\n" if ( $debug > 1 );
     $while_ctr++;
   }
   if ((length $series_id) > 0)
@@ -514,7 +614,7 @@ sub parse_episode_content
   my $series_ctr = 1;
   my @bad_series_array;
   my @series_search_resp = search_the_tv_db_for_series($series_name,@bad_series_array);
-  $debug > 1 ? print Dumper(@series_search_resp) : 0;
+  print Dumper(@series_search_resp) if ( $debug > 1 );
   my $series_id = $series_search_resp[0];
   my $series_resp_count = $series_search_resp[1];
   my $content = get_http_response("http://".$THETVDB."/api/GetEpisodeByAirDate.php?apikey=$apikey&seriesid=$series_id&airdate=$airdate");
@@ -535,109 +635,5 @@ sub parse_episode_content
     $episode_number = $SEC[1];
     $season_number = $SEC[0];		
   }
-  return ($season_number, $episode_number);
-  
+  return ($season_number, $episode_number); 
 }
-
-@T = parse_episode_content($progname);
-$S = $T[0];
-$E = $T[1];
-if ( length($S) == 0 or length($E) == 0 ) {
-  print "Empty season or episode number returned from thetvdb.com...exiting!\n";
-  exit 1;
-}
-print "\tSeason Number: $S\n";
-print "\tEpisode Number: $E\n";
-
-$outfile = $progname;
-if ($subtitle ne "")
-{
-  #    $outfile = "$progname.S${S}E${E}.$subtitle";
-  $outfile = "$progname.S${S}E${E}";
-  }
-  
-  #####
-  # Begin cutting procedure
-  #####
-  
-  if ( !$direct_db_cutlist ) {
-    # Original exec line used a patched version of mythcommflag - instead, I have implemented some simple Javascript in the avidemux project file
-    #exec "mythcommflag --getcutlist-avidemux -f \"$filename\" --outputfile \"$recordings_dir\"/temp.proj;
-    system "mythcommflag --getcutlist -f $filename --very-quiet > $temp_dir/temp.proj";
-    
-    # Now we need to read the cutlist from the file
-    open FILE, "$temp_dir/temp.proj" or die $!;
-    $cutlist_line = <FILE>;
-    close(FILE);
-    # Make sure there is a cutlist or exit with error message
-    if ( $cutlist_line =~ m/Cutlist:\s*$/i ) {
-      print "No cutlist present for selected recording...trying commercial skip list...\n";
-      # now we check for a commercial skip list...
-      system "mythcommflag --getskiplist -f $filename --very-quiet > $temp_dir/temp.proj";
-      # read file, again
-      open FILE, "$temp_dir/temp.proj" or die $!;
-      $cutlist_line = <FILE>;
-      close(FILE);
-      if ( $cutlist_line =~ m/Commercial Skip List:\w*$/i ) {
-	print "No commercial skip list present either!  Exiting!!\n\n";
-	exit 10;
-      }
-      print "Using commercial skip list.  Results may vary...\n";
-    }	
-    # Now extract the cutlist array
-    $cutlist_line =~ s/[^-0-9,]//g;
-    #$cutlist_line = '"' . $cutlist_line . '"';
-    #$cutlist_line =~ s/,/","/g;
-    print "Cutlist: $cutlist_line\n";
-    # move the addSegment line creation to here...not the tinypy script
-    @cutlist_array = split(',', $cutlist_line);
-    $cutlist_segments = scalar(@cutlist_array);
-    print "There are $cutlist_segments video segments to be spliced.\n";
-    $cutlist_sub_str = "";
-    $fpsmult = 29.97;
-    $ctr=0;
-    for ( $n=0; $n < $cutlist_segments; $n++ ) {
-      $cutlist_array[$n] =~ m/(\d+)-(\d+)/;
-      $comm_start = $1 / $fpsmult;
-      $comm_end = $2 / $fpsmult;
-      $cutlist_sub_str = $cutlist_sub_str . sprintf("%02d",floor($comm_start/3600)) . ":" . sprintf("%02d",floor($comm_start/60)) . ":" . sprintf("%06.3f",fmod($comm_start,60)) . ",";
-      $cutlist_sub_str = $cutlist_sub_str . sprintf("%02d",floor($comm_end/3600)) . ":" . sprintf("%02d",floor($comm_end/60)) . ":" . sprintf("%06.3f",fmod($comm_end,60)) . ",";
-      if ( $n == 1 ) {
-	$comm_start == 0 ? $vidstart = 2 : $vidstart = 1;
-      }
-      $ctr+=2;
-    }
-    $ctr++;
-  }
-  if ( $cutlist_sub_str eq "" ) {
-    print "There seems to be no cutlist or skiplist present for this recording.\n";
-    exit;
-  } else {
-    print "mkvmerge timecodes: $cutlist_sub_str\nctr: $ctr\nvidstart: $vidstart\n";
-  }
-  
-  if ( !$dryrun ) {
-    # First we need to run the MPEG-TS file through ffmpeg to mux it into a Matroska container
-    system "ffmpeg -y -i $filename -vcodec copy -acodec copy -f matroska $temp_dir/temp_$now.mkv";
-    
-    # Now we can call mkvmerge to split the file
-    system "mkvmerge -o $temp_dir/split_$now.mkv --split timecodes:$cutlist_sub_str $temp_dir/temp_$now.mkv";
-    
-    # build the merge string
-    if ( $vidstart == 1 ) {
-      $merge_string = "$temp_dir/split_$now-001.mkv";
-    } else {
-      $merge_string = "$temp_dir/split_$now-002.mkv";
-    }
-    for ( $n=$vidstart+2; $n<=$ctr; $n+=2 ) {
-      print "n: $n\n";
-      $merge_string = $merge_string . " +$temp_dir/split_$now-" . sprintf("%03d",$n) . ".mkv";	
-    }
-    print "merge string: $merge_string\n";
-    # Now merge the proper files
-    system "mkvmerge -o $output_dir/\"$outfile\".mkv $merge_string";
-    
-    # Do a little cleanup.
-    system "rm $temp_dir/*$now*";
-  }
-  

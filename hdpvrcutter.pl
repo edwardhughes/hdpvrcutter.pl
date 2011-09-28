@@ -2,7 +2,7 @@
 #
 # HD-PVR Cutter
 #
-#	Modified by: Edward Hughes IV (edward ATSIGN edwardhughes DOT org)
+#	Modified by: Edward Hughes IV (edward ATSIGN edwardhughes DOT org) starting 2011/03/16
 #
 #	Originally written by: Christopher Meredith (chmeredith {at} gmail)
 #
@@ -22,13 +22,21 @@
 #    cybertron's perl script (http://www.justlinux.com/forum/showpost.php?p=878967&postcount=4)
 #
 # Requires:
-#    
-#    AVIDemux 2.4 SVN revision 4445 or later (current 10/7/08)
-#    Working MythTV setup (To steal the cutlist from)
-#    MKVtoolnix (to fix indexing and drop into an MKV)
+#    MKVtoolnix  - specifically mkvmerge to do the splitting AND the merging of the cut video
+#    Working MythTV database and access to the recordings directory
 #
 # Type hdpvrcutter.pl --help for usage information.
 #
+#
+# @todo: define exit codes
+#
+#
+### Version 0.5.2 - 2011/09/27
+#   - Removed dynamic query generation from mythconverg.recorded table search.  Replaced with proper query->execute statement
+#
+### Version 0.5.1 - 2011/09/27
+#   - Updated obsolete "Requires" section (see above)
+#   - A bit more cleanup
 #
 ### Version 0.5 - 2011/09/25
 #   - Changed command line arguments to a much more intuitive usage
@@ -40,20 +48,17 @@
 #   - Added frame rate detection through use of ffmpeg system call
 #   - Added additional error handling and fallback to commercial skip-list if no cutlist is found
 #
-### Version 0.3 - 2011/03/16
+### Version 0.3 - 2011/03/16 (Start work by Edward Hughes)
 #   - Removed dependency on mythcommflag patch.
 #   - Use perl DBI interface for MySQL queries
 #   - Hack used to properly parse input arguments
 #
-### Version 0.2 - 5/30/09
+### Version 0.2 - 20009/05/30
 #   - Strip apostrophes when querying TVDB
 #
 ### VERSION 0.1
 #   - Initial release
 #
-#
-#
-# @todo: define exit codes
 
 use LWP::UserAgent;
 use DBI;
@@ -170,9 +175,7 @@ $output_dir .= '/';
 $apikey = "259FD33BA7C03A14";
 $THETVDB = "www.thetvdb.com";
 $global_user_agent = LWP::UserAgent->new;
-#$progname = "$ARGV[0]";
 print "Program Name: $progname\n";
-#$subtitle = $ARGV[1];
 print "Subtitle: $subtitle\n";
 $progname =~ s/\'/\\'/g; # SQL doesn't like apostrophes
 $subtitle =~ s /\'/\\'/g;
@@ -182,12 +185,12 @@ $subtitle =~ s /\'/\\'/g;
 # Connect to MySQL database
 $dbh = DBI->connect("DBI:mysql:database=" . $mysql_db . ";host=" . $mysql_host, $mysql_user, $mysql_password);
 # prepare the query (this is bad - dynamic query generation - but since this is local and not a web app we'll allow it)
-$query_str = "SELECT chanid,starttime,endtime,originalairdate FROM recorded WHERE title LIKE '$progname' AND subtitle LIKE '$subtitle'";
+$query_str = "SELECT chanid,starttime,endtime,originalairdate FROM recorded WHERE title LIKE ? AND subtitle LIKE ?";
 $debug > 1 ? print "Query: $query_str\n" : 0;
 $query = $dbh->prepare($query_str);
 # Retrieve program information
 # execute query ->
-$query->execute();
+$query->execute($progname,$subtitle);
 # fetch response
 @infoparts = $query->fetchrow_array();
 $debug > 1 ? print "Infoparts: " . Dumper(@infoparts) . "\n" : 0;

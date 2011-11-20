@@ -5,6 +5,7 @@
 #	Modified by: Edward Hughes IV (edward ATSIGN edwardhughes DOT org) starting 2011/03/16
 #
 #	Originally written by: Christopher Meredith (chmeredith {at} gmail)
+#		(http://monopedilos.com/dokuwiki/doku.php?id=hdpvrcutter.pl)
 #
 #
 # Lossless commercial cutting of HD-PVR recordings using avidemux
@@ -23,6 +24,7 @@
 #
 # Requires:
 #    MKVtoolnix  - specifically mkvmerge to do the splitting AND the merging of the cut video
+#    ffmpeg to pre-process the recording into a Matroska container
 #    Working MythTV database and access to the recordings directory
 #
 # Type hdpvrcutter.pl --help for usage information.
@@ -110,7 +112,7 @@ usage() if ( @ARGV < 1 or ! GetOptions(
 'direct-db-cutlist' => \$direct_db_cutlist,
 'title=s' => \$title,
 'searchtitle=s' => \$searchtitle,
-'subtitle=s' => \$subtitle,
+'subtitle:s' => \$subtitle,	# optional string - empty string is used to assume a movie
 'host=s' => \$mysql_host,
 'dbname=s' => \$mysql_db,
 'user=s' => \$mysql_user,
@@ -128,23 +130,32 @@ sub usage
   exit;
 }
 
+# Trim whitespace from title(s)
+$progname = $title;
+$progname =~ s/^\s+//; # leading
+$progname =~ s/\s+$//; # trailing
+$subtitle =~ s/^\s+//; # leading
+$subtitle =~ s/\s+$//; # trailing
+
 # Checks and error messages for required flags
 print "Must supply the password for the MySQL MythTV database [--passwd=PASSWORD] .\n" if ( !$mysql_password );
 print "Must supply the full path to the MythTV recordings directory [--recordings=RECORDINGS_DIR].\n" if ( !$recordings_dir );
 print "Must supply the full path the the temporary working directory [--tempdir=TEMPORARY_DIR].\n" if ( !$temp_dir );
 print "Must supply the full the path the to output destination directory [--dest=DESTINATION_DIR].\n" if ( !$output_dir );
 print "How can you export a show without a title?  [--title=TITLE]\n" if ( !$title );
-print "You need a subtitle to specify the exact show to export. [--subtitle=SUBTITLE]\n" if ( !$subtitle );
+print "No subtitle.  I will assume we are exporting a movie? [--subtitle=SUBTITLE]\n" if ( !$subtitle );
 
 # Exit if not all of the required parameters are supplied
-if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !$title or !$subtitle ) {
+if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !$title ) {
   exit;
 }
 
 # Let's print some feedback about the supplied arguments
 print "Here's what I understand we'll be doing:\n";
 print "I'll be accessing the '$mysql_db' database on the host '$mysql_host'\n\tas the user '$mysql_user' (I'm not going to show you the password)\n";
-print "I'll then export the recording: $title - $subtitle\n";
+print "I'll then export the recording: ";
+$subtitle ne "" ? print "$title - $subtitle" : print "$title";
+print "\n";
 print "One more thing...I'll be using the search string '$searchtitle'\n\tfor the tvdb query instead of '$title'.\n" if ( $searchtitle );
 print "\n***** DIRECT DB ACCESS FOR CUTLIST/SKIPLIST RETRIEVAL.  NOT AS RELIABLE AS 'mythcommflag'! *****\n\n" if ( $direct_db_cutlist );
 print "***** DRY RUN.  WILL NOT PRODUCE ANY OUTPUT FILES. *****\n\n" if ( $dryrun );
@@ -160,12 +171,6 @@ if ( $verbose and $debug == 0 ) {
 
 
 ## Proceed with the export
-# Trim whitespace from title(s)
-$progname = $title;
-$progname =~ s/^\s+//; # leading
-$progname =~ s/\s+$//; # trailing
-$subtitle =~ s/^\s+//; # leading
-$subtitle =~ s/\s+$//; # trailing
 
 # Add a trailing forward slash to the directories to be safe
 $recordings_dir .= '/';
@@ -216,7 +221,7 @@ if ( $direct_db_cutlist ) {
   my $secs;
   while ( @markup = $query->fetchrow_array() ) {
     $secs = $markup[0] / $fps;
-    print "\tmark: $markup[0] (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",floor($secs/60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" if ( $debug >= 1 );
+    print "\tmark: $markup[0] ($secs s) (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" if ( $debug >= 1 );
     push(@marks,$markup[0]);
     push(@types,$markup[1]);
   }
@@ -228,7 +233,7 @@ if ( $direct_db_cutlist ) {
     $query->execute($chanid,$starttime);
     while ( @markup = $query->fetchrow_array() ) {
       $secs = $markup[0] / $fps;
-      print "\tmark: $markup[0] (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",floor($secs/60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" if ( $debug >= 1 );
+      print "\tmark: $markup[0] ($secs s) (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" if ( $debug >= 1 );
       push(@marks,$markup[0]);
       push(@types,$markup[1]);
     }      
@@ -239,7 +244,7 @@ if ( $direct_db_cutlist ) {
   }
   foreach my $mark ( @marks ) {
     $secs = $mark / $fps;
-    $cutlist_sub_str .= sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",floor($secs/60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . ",";
+    $cutlist_sub_str .= sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . ",";
     $ctr++;
   }
   $ctr++;
@@ -292,19 +297,27 @@ $airdate = $originalairdate ne '0000-00-00' ? $originalairdate : $recordedairdat
 # Query thetvdb.com for program information
 #####
 
-@T = parse_episode_content($progname);
-$S = $T[0];
-$E = $T[1];
-if ( length($S) == 0 or length($E) == 0 ) {
-  print "Empty season or episode number returned from thetvdb.com.  Exiting...\n";
-  exit 1;
+if ( $subtitle ne "" ) {
+  print "Beginning thetvdb.com lookup...\n";
+  @T = parse_episode_content($progname);
+  $S = $T[0];
+  $E = $T[1];
+  if ( length($S) == 0 or length($E) == 0 ) {
+    print "Empty season or episode number returned from thetvdb.com.  Exiting...\n";
+    exit 1;
+  }
+  # Print some useful information
+  print "\tSeason Number: $S\n";
+  print "\tEpisode Number: $E\n";
+  # Generate the output filename
+  $outfile = "$progname.S${S}E${E}";
+} else {
+  print "Skipping thetvdb.com lookup...\n";
+  $outfile = "$progname";
 }
-# Print some useful information
-print "\tSeason Number: $S\n";
-print "\tEpisode Number: $E\n";
+# Display the output filename
+print "The output file name is: \"$outfile.mkv\"\n";
 
-# Generate the output filename
-$outfile = "$progname.S${S}E${E}";
 
 #####
 # Begin cutting procedure
@@ -347,8 +360,8 @@ if ( !$direct_db_cutlist ) {
     $cutlist_array[$n] =~ m/(\d+)-(\d+)/;
     $comm_start = $1 / $fps;
     $comm_end = $2 / $fps;
-    $cutlist_sub_str = $cutlist_sub_str . sprintf("%02d",floor($comm_start/3600)) . ":" . sprintf("%02d",floor($comm_start/60)) . ":" . sprintf("%06.3f",fmod($comm_start,60)) . ",";
-    $cutlist_sub_str = $cutlist_sub_str . sprintf("%02d",floor($comm_end/3600)) . ":" . sprintf("%02d",floor($comm_end/60)) . ":" . sprintf("%06.3f",fmod($comm_end,60)) . ",";
+    $cutlist_sub_str = $cutlist_sub_str . sprintf("%02d",floor($comm_start/3600)) . ":" . sprintf("%02d",fmod(floor($comm_start/60),60)) . ":" . sprintf("%06.3f",fmod($comm_start,60)) . ",";
+    $cutlist_sub_str = $cutlist_sub_str . sprintf("%02d",floor($comm_end/3600)) . ":" . sprintf("%02d",fmod(floor($comm_end/60),60)) . ":" . sprintf("%06.3f",fmod($comm_end,60)) . ",";
     if ( $n == 1 ) {
       $comm_start == 0 ? $vidstart = 2 : $vidstart = 1;
     }
@@ -362,6 +375,9 @@ if ( $cutlist_sub_str eq "" ) {
   print "There seems to be no cutlist or skiplist present for this recording. EXITING!!!\n";
   exit;
 } else {
+  # Remove any trailing commas from the culist string
+  $cutlist_sub_str =~ s/^(.+),$//;
+  $cutlist_sub_str = $1;
   print "mkvmerge timecodes: $cutlist_sub_str\n" if ( $debug >= 1 );
   print "\tctr: $ctr\n\tvidstart: $vidstart\n" if ( $debug > 1 );
 }

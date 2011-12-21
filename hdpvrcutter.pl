@@ -78,7 +78,7 @@ my $output_dir = '';
 my $help = '';
 
 # Print the help if requested or no arguments are used
-usage() if ( @ARGV < 1 or ! GetOptions(
+usage() if ( @ARGV < 1 or $ARGV[0] eq "--help" or $ARGV[0] eq "?" or ! GetOptions(
                                        'verbose' => \$verbose,
                                        'debug' => \$debug,
                                        'dryrun' => \$dryrun,

@@ -308,16 +308,16 @@ if ( $cutlist_sub_str eq "" ) {
 
 if ( !$dryrun ) {
     # First we need to run the MPEG-TS file through ffmpeg to mux it into a Matroska container
-    #  my $ffmpeg_string = "ffmpeg -y -i $filename -vcodec copy -acodec copy -f matroska $temp_dir/temp_$now.mkv";
-    #  print "Calling ffmpeg to repackage video file into Matroska (mkv) container.\n" if ( $debug >= 1 );
-    #  print "ffmpeg call: $ffmpeg_string\n" if ( $debug > 1 );
-    #  system $ffmpeg_string;
+    my $ffmpeg_string = "ffmpeg -y -i $filename -vcodec copy -acodec copy -f matroska $temp_dir/temp_$now.mkv";
+    print "Calling ffmpeg to repackage video file into Matroska (mkv) container.\n" if ( $debug >= 1 );
+    print "ffmpeg call: $ffmpeg_string\n" if ( $debug > 1 );
+    system $ffmpeg_string;
 
     # Now we can call mkvmerge to split the file
-    #  my $split_string = "mkvmerge -o $temp_dir/split_$now.mkv --split timecodes:$cutlist_sub_str $temp_dir/temp_$now.mkv";
+    my $split_string = "mkvmerge -o $temp_dir/split_$now.mkv --split timecodes:$cutlist_sub_str $temp_dir/temp_$now.mkv";
     ##### mkvmerge >= 5.0.0 can handle MPEG-TS files.  Should I remove the ffmpeg conversion above absolutely, or do some kind
     ##### of version check on mkvmerge, conditionally converting if the version is too old?
-    my $split_string = "mkvmerge -o $temp_dir/split_$now.mkv --split timecodes:$cutlist_sub_str $filename";
+    #my $split_string = "mkvmerge -o $temp_dir/split_$now.mkv --split timecodes:$cutlist_sub_str $filename";
     print "Calling mkvmerge to split video file.\n" if ( $debug >= 1 );
     print "mkvmerge split call: $split_string\n" if ( $debug > 1 );
     system $split_string;

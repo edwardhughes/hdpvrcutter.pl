@@ -1,0 +1,31 @@
+### Version 0.6 - 2011/12/21
+   - Removed --direct-db-cutlist option.  It is now default.  This removes the mythcommflag system call/dependency.
+   - For the current version, the ffmpeg system call is no longer necessary with mkvmerge >=5.0.0.  This should be converted to include a version check in later releases.
+
+### Version 0.5.2 - 2011/09/27
+   - Removed dynamic query generation from mythconverg.recorded table search.  Replaced with proper query->execute statement
+
+### Version 0.5.1 - 2011/09/27
+   - Updated obsolete "Requires" section (see above)
+   - A bit more cleanup
+
+### Version 0.5 - 2011/09/25
+   - Changed command line arguments to a much more intuitive usage
+   - Added method to directly call database for cutlist/skiplist retrieval instead of using mythcommflag
+   - Using 'mkvmerge --split' instead of avidemux3_cli with better, although still-far-from-perfect - results
+   - Added flag to allow for alternate title string to be used with tvdb search
+
+### Version 0.4 - 2011/06/19
+   - Added frame rate detection through use of ffmpeg system call
+   - Added additional error handling and fallback to commercial skip-list if no cutlist is found
+
+### Version 0.3 - 2011/03/16 (Start work by Edward Hughes)
+   - Removed dependency on mythcommflag patch.
+   - Use perl DBI interface for MySQL queries
+   - Hack used to properly parse input arguments
+
+### Version 0.2 - 20009/05/30
+   - Strip apostrophes when querying TVDB
+
+### VERSION 0.1
+   - Initial release

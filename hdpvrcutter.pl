@@ -64,7 +64,6 @@ my $now = time();
 my $verbose = '';
 my $debug = '';
 my $dryrun = 0;
-my $direct_db_cutlist = '';
 my $title = '';
 my $searchtitle = '';
 my $subtitle = '';
@@ -75,6 +74,7 @@ my $mysql_password = '';
 my $recordings_dir = '';
 my $temp_dir = '';
 my $output_dir = '';
+my $jobid = '';
 my $help = '';
 
 # Print the help if requested or no arguments are used
@@ -92,13 +92,14 @@ usage() if ( @ARGV < 1 or $ARGV[0] eq "--help" or $ARGV[0] eq "?" or ! GetOption
                                        'recordings=s' => \$recordings_dir,
                                        'tempdir=s' => \$temp_dir,
                                        'dest=s' => \$output_dir,
+                                       'jobid=i' => \$jobid,
                                        'help|?' => \$help)
            );
 
 sub usage
         {
             print "Unknown option: @_\n" if ( @_ );
-            print "usage: hdpvrcutter.pl --passwd=PASSWORD --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR --title=TITLE --subtitle=SUBTITLE [--verbose] [--debug] [--dryrun] [--host=HOSTNAME] [--dbname=DBNAME] [--user=USER] [--searchtitle SEARCH_TITLE] [--help|-?]\n";
+            print "usage: hdpvrcutter.pl --passwd=PASSWORD --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR --title=TITLE --subtitle=SUBTITLE [--verbose] [--debug] [--dryrun] [--host=HOSTNAME] [--dbname=DBNAME] [--user=USER] [--searchtitle SEARCH_TITLE] [--jobid JOBID] [--help|-?]\n";
             exit;
         }
 
@@ -125,11 +126,12 @@ if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !$tit
 # Let's print some feedback about the supplied arguments
 print "Here's what I understand we'll be doing:\n";
 print "I'll be accessing the '$mysql_db' database on the host '$mysql_host'\n\tas the user '$mysql_user' (I'm not going to show you the password)\n";
+print "I cannot update the MythTV jobqueue table because I was not supplied a jobid.\n" if ( !$jobid );
+print "The jobid supplied is: $jobid\n" if ( $jobid );
 print "I'll then export the recording: ";
 $subtitle ne "" ? print "$title - $subtitle" : print "$title";
 print "\n";
 print "One more thing...I'll be using the search string '$searchtitle'\n\tfor the tvdb query instead of '$title'.\n" if ( $searchtitle );
-print "\n***** DIRECT DB ACCESS FOR CUTLIST/SKIPLIST RETRIEVAL.  NOT AS RELIABLE AS 'mythcommflag'! *****\n\n" if ( $direct_db_cutlist );
 print "***** DRY RUN.  WILL NOT PRODUCE ANY OUTPUT FILES. *****\n\n" if ( $dryrun );
 if ( $debug ) {
     $debug = 2;
@@ -161,7 +163,7 @@ $subtitle =~ s /\'/\\'/g;
 # Let's use perl's DBI module to access the database
 # Connect to MySQL database
 $dbh = DBI->connect("DBI:mysql:database=" . $mysql_db . ";host=" . $mysql_host, $mysql_user, $mysql_password);
-# prepare the query (this is bad - dynamic query generation - but since this is local and not a web app we'll allow it)
+# prepare the query
 $query_str = "SELECT chanid,starttime,endtime,originalairdate FROM recorded WHERE title LIKE ? AND subtitle LIKE ?";
 $debug > 1 ? print "Query: $query_str\n" : 0;
 $query = $dbh->prepare($query_str);
@@ -174,6 +176,8 @@ $debug > 1 ? print "Infoparts: " . Dumper(@infoparts) . "\n" : 0;
 # put the channel id and starttime into more intuitive variables
 $chanid = $infoparts[0];
 $starttime = $infoparts[1];
+# release the query
+$query->finish;
 
 # Let's make sure that the response is not empty
 if ( !@infoparts or length($infoparts[0]) == 0 or length($infoparts[1]) == 0 ) {
@@ -196,6 +200,9 @@ while ( @markup = $query->fetchrow_array() ) {
     push(@marks,$markup[0]);
     push(@types,$markup[1]);
 }
+# release the query
+$query->finish;
+
 # A cutlist was not found.  Let's query for a commercial skip list.
 if ( !@marks ) {
     $query_str = "SELECT mark,type FROM recordedmarkup WHERE chanid=? AND starttime=? AND ( type=4 OR type=5 ) ORDER BY mark ASC";
@@ -208,6 +215,8 @@ if ( !@marks ) {
         push(@marks,$markup[0]);
         push(@types,$markup[1]);
     }
+    # release the query
+    $query->finish;
 }
 if ( !@marks ) {
     print "No cutlist or commercial skiplist found for specified recording.\nPlease check your inputs and/or create a cutlist then try again.  Exiting...\n";
@@ -226,11 +235,6 @@ if ( $marks[0] == 0 or $types[0] == 0 or $types[0] == 5 ) {
 } else {
     $vidstart = 1;
 }
-
-# release the query
-$query->finish;
-# disconnect from the database
-$dbh->disconnect();
 
 # Be sure to override the MythTV program name with the alternate search-title, if supplied
 $progname = $searchtitle if ( $searchtitle );
@@ -297,6 +301,8 @@ print "The output file name is: \"$outfile.mkv\"\n";
 # Some error checking to ensure that we actually have a cutlist before proceding with the system calls
 if ( $cutlist_sub_str eq "" ) {
     print "There seems to be no cutlist or skiplist present for this recording. EXITING!!!\n";
+    # Update status and comment fields in the jobqueue table to inform the user of the exit reason
+    updateStatus($dbh,$jobid,288,"There was no cut/skip list found for the recording.") if ( $jobid );
     exit;
 } else {
     # Remove any trailing commas from the culist string
@@ -307,11 +313,30 @@ if ( $cutlist_sub_str eq "" ) {
 }
 
 if ( !$dryrun ) {
+    updateStatus($dbh,$jobid,4,"Starting ffmpeg conversion.");
     # First we need to run the MPEG-TS file through ffmpeg to mux it into a Matroska container
     my $ffmpeg_string = "ffmpeg -y -i $filename -vcodec copy -acodec copy -f matroska $temp_dir/temp_$now.mkv";
     print "Calling ffmpeg to repackage video file into Matroska (mkv) container.\n" if ( $debug >= 1 );
     print "ffmpeg call: $ffmpeg_string\n" if ( $debug > 1 );
     system $ffmpeg_string;
+    if ( $? == -1 ) {
+        print "ERROR. Failed to execute ffmpeg system call -> $ffmpeg_string\n";
+        cleanup_temp();
+        exit 1;
+    } elsif ( $? & 127 ) {
+        printf "ERROR. Child (ffmpeg) process died with signal %d, %s coredump\n", ($? & 127), ($? & 128) ? 'with' : 'without';
+        cleanup_temp();
+        exit 1;
+    } else {
+        $ffmpeg_exit_code = $? >> 8;
+        if ( $ffmpeg_exit_code != 0 ) {
+            # There was an error.  Update the jobqueue table appropriately and exit.
+            updateStatus($dbh,$jobid,304,"ffmpeg child process exited with error code $ffmpeg_exit_code.");
+        } else {
+            # ffmpeg call exited normally - update jobqueue comment to indicate runtime status
+            updateStatus($dbh,$jobid,4,"ffmpeg conversion step completed, beginning mkvmerge split.");
+        }
+    }
 
     # Now we can call mkvmerge to split the file
     my $split_string = "mkvmerge -o $temp_dir/split_$now.mkv --split timecodes:$cutlist_sub_str $temp_dir/temp_$now.mkv";
@@ -321,6 +346,24 @@ if ( !$dryrun ) {
     print "Calling mkvmerge to split video file.\n" if ( $debug >= 1 );
     print "mkvmerge split call: $split_string\n" if ( $debug > 1 );
     system $split_string;
+    if ( $? == -1 ) {
+        print "ERROR. Failed to execute mkvmerge (split) system call -> $split_string\n";
+        cleanup_temp();
+        exit 1;
+    } elsif ( $? & 127 ) {
+        printf "ERROR. Child (mkvmerge split) process died with signal %d, %s coredump\n", ($? & 127), ($? & 128) ? 'with' : 'without';
+        cleanup_temp();
+        exit 1;
+    } else {
+        $split_exit_code = $? >> 8;
+        if ( $split_exit_code != 0 ) {
+            # There was an error.  Update the jobqueue table appropriately and exit.
+            updateStatus($dbh,$jobid,304,"mkvmerge (split) child process exited with error code $split_exit_code.");
+        } else {
+            # ffmpeg call exited normally - update jobqueue comment to indicate runtime status
+            updateStatus($dbh,$jobid,4,"mkvmerge (split) conversion step completed, beginning mkvmerge merge.");
+        }
+    }
 
     # build the merge string
     if ( $vidstart == 1 ) {
@@ -336,10 +379,34 @@ if ( !$dryrun ) {
     print "mkvmerge merge string: $merge_string\n" if ( $debug > 1 );
     # Now merge the proper files
     system "mkvmerge -o $output_dir/\"$outfile\".mkv $merge_string";
+    if ( $? == -1 ) {
+        print "ERROR. Failed to execute mkvmerge (split) system call -> $merge_string\n";
+        cleanup_temp();
+        exit 1;
+    } elsif ( $? & 127 ) {
+        printf "ERROR. Child (mkvmerge merge) process died with signal %d, %s coredump\n", ($? & 127), ($? & 128) ? 'with' : 'without';
+        cleanup_temp();
+        exit 1;
+    } else {
+        $merge_exit_code = $? >> 8;
+        if ( $merge_exit_code != 0 ) {
+            # There was an error.  Update the jobqueue table appropriately and exit.
+            updateStatus($dbh,$jobid,304,"mkvmerge (merge) child process exited with error code $merge_exit_code.");
+        } else {
+            # ffmpeg call exited normally - update jobqueue comment to indicate runtime status
+            updateStatus($dbh,$jobid,4,"mkvmerge (merge) conversion step completed, beginning mkvmerge merge.");
+        }
+    }
 
     # cleanup
     cleanup_temp();
 }
+
+# let's set the exit status as successful
+updateStatus($dbh,$jobid,272,"Export finished.  Recording saved as $outfile.") if ( $jobid );
+
+# disconnect from the database
+$dbh->disconnect();
 
 # Clean exit
 exit 0;
@@ -362,6 +429,28 @@ sub cleanup_temp {
     # Do a little cleanup (don't if debug mode is in use)
     system "rm $temp_dir/*$now*" if ( $debug <= 1 );
 }
+
+sub updateStatus
+        {
+            my $dbh = 0;
+            my $jobid = 0;
+            my $status_code = 0;
+            my $comment_str = 0;
+
+            $dbh = $_[0];
+            $jobid = $_[1];
+            $status_code = $_[2];
+            $comment_str = $_[3];
+
+            if ( $dbh && $jobid && $status_code && $comment_str ) {
+                $query_str = "UPDATE jobqueue SET status=?,comment=? WHERE id=?";
+                $debug > 1 ? print "Update jobqueue status query: $query_str\n" : 0;
+                $query = $dbh->prepare($query_str);
+                # Retrieve program information
+                # execute query ->
+                $query->execute($status_code,$comment_str,$jobid);
+            }
+        }
 
 sub get_http_response_lwp
         {

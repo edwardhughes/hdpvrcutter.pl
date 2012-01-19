@@ -31,7 +31,6 @@
 #
 #
 # @todo: define exit codes
-# @todo: add mkvtoolnix version check for conditional ffmpeg system call
 #
 
 
@@ -123,6 +122,8 @@ if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !$tit
     exit;
 }
 
+# @TODO: We need to perform some dependency checks before continuing.  1)ffmpeg 2)mkvmerge 3)mediainfo
+
 # Let's print some feedback about the supplied arguments
 print "Here's what I understand we'll be doing:\n";
 print "I'll be accessing the '$mysql_db' database on the host '$mysql_host'\n\tas the user '$mysql_user' (I'm not going to show you the password)\n";
@@ -194,9 +195,11 @@ $query->execute($chanid,$starttime);
 my @marks;
 my @types;
 my $secs;
+# Loop through each database response
 while ( @markup = $query->fetchrow_array() ) {
     $secs = $markup[0] / $fps;
     print "\tmark: $markup[0] ($secs s) (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" if ( $debug >= 1 );
+    # store the markup frame number and type for later use
     push(@marks,$markup[0]);
     push(@types,$markup[1]);
 }
@@ -209,9 +212,11 @@ if ( !@marks ) {
     print "Direct skiplist query string: $query_str\n" if ( $debug > 1 );
     $query = $dbh->prepare($query_str) or die "Couldn't prepare statement: " . $dbh->errstr;
     $query->execute($chanid,$starttime);
+    # loop through each database response
     while ( @markup = $query->fetchrow_array() ) {
         $secs = $markup[0] / $fps;
         print "\tmark: $markup[0] ($secs s) (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" if ( $debug >= 1 );
+        # store for later use
         push(@marks,$markup[0]);
         push(@types,$markup[1]);
     }
@@ -223,6 +228,8 @@ if ( !@marks ) {
     exit 1;
 }
 foreach my $mark ( @marks ) {
+    # @TODO: eliminate this hard-coded FPS value.  Can I detect it for each video processed?  Does the mythcommflag know it when inserting cut/skip-points?  CONSIDER USING MEDIAINFO AS A DEPENDENCY!!  ex: mediainfo --Inform="Video;%FrameRate%" inputfile.mpg
+    # running commands with backquotes (``) will return the command output to perl.
     $secs = $mark / $fps;
     $cutlist_sub_str .= sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . ",";
     $ctr++;
@@ -450,7 +457,7 @@ sub updateStatus
 
             if ( $dbh && $jobid && $status_code && $comment_str ) {
                 $query_str = "UPDATE jobqueue SET status=?,comment=? WHERE id=?";
-                $debug > 1 ? print "Update jobqueue status query: $query_str\n" : 0;
+                print "Update jobqueue status query: $query_str\n" if ( $debug > 1 );
                 $query = $dbh->prepare($query_str);
                 # Retrieve program information
                 # execute query ->

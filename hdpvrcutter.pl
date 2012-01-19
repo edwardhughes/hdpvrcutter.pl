@@ -313,55 +313,57 @@ if ( $cutlist_sub_str eq "" ) {
 }
 
 if ( !$dryrun ) {
-    updateStatus($dbh,$jobid,4,"Starting ffmpeg conversion.");
+    updateStatus($dbh,$jobid,4,"($outfile): Starting ffmpeg conversion.");
     # First we need to run the MPEG-TS file through ffmpeg to mux it into a Matroska container
     my $ffmpeg_string = "ffmpeg -y -i $filename -vcodec copy -acodec copy -f matroska $temp_dir/temp_$now.mkv";
     print "Calling ffmpeg to repackage video file into Matroska (mkv) container.\n" if ( $debug >= 1 );
     print "ffmpeg call: $ffmpeg_string\n" if ( $debug > 1 );
     system $ffmpeg_string;
     if ( $? == -1 ) {
-        print "ERROR. Failed to execute ffmpeg system call -> $ffmpeg_string\n";
+        print "($outfile): ERROR. Failed to execute ffmpeg system call -> $ffmpeg_string\n";
         cleanup_temp();
         exit 1;
     } elsif ( $? & 127 ) {
-        printf "ERROR. Child (ffmpeg) process died with signal %d, %s coredump\n", ($? & 127), ($? & 128) ? 'with' : 'without';
+        printf "($outfile): ERROR. Child (ffmpeg) process died with signal %d, %s coredump\n", ($? & 127), ($? & 128) ? 'with' : 'without';
         cleanup_temp();
         exit 1;
     } else {
         $ffmpeg_exit_code = $? >> 8;
         if ( $ffmpeg_exit_code != 0 ) {
             # There was an error.  Update the jobqueue table appropriately and exit.
-            updateStatus($dbh,$jobid,304,"ffmpeg child process exited with error code $ffmpeg_exit_code.");
+            updateStatus($dbh,$jobid,304,"($outfile): ffmpeg child process exited with error code $ffmpeg_exit_code.");
+            exit 1;
         } else {
             # ffmpeg call exited normally - update jobqueue comment to indicate runtime status
-            updateStatus($dbh,$jobid,4,"ffmpeg conversion step completed, beginning mkvmerge split.");
+            updateStatus($dbh,$jobid,4,"($outfile): ffmpeg conversion step completed, beginning mkvmerge split.");
         }
     }
 
     # Now we can call mkvmerge to split the file
     my $split_string = "mkvmerge -o $temp_dir/split_$now.mkv --split timecodes:$cutlist_sub_str $temp_dir/temp_$now.mkv";
-    ##### mkvmerge >= 5.0.0 can handle MPEG-TS files.  Should I remove the ffmpeg conversion above absolutely, or do some kind
-    ##### of version check on mkvmerge, conditionally converting if the version is too old?
-    #my $split_string = "mkvmerge -o $temp_dir/split_$now.mkv --split timecodes:$cutlist_sub_str $filename";
     print "Calling mkvmerge to split video file.\n" if ( $debug >= 1 );
     print "mkvmerge split call: $split_string\n" if ( $debug > 1 );
     system $split_string;
     if ( $? == -1 ) {
-        print "ERROR. Failed to execute mkvmerge (split) system call -> $split_string\n";
+        print "($outfile): ERROR. Failed to execute mkvmerge (split) system call -> $split_string\n";
         cleanup_temp();
         exit 1;
     } elsif ( $? & 127 ) {
-        printf "ERROR. Child (mkvmerge split) process died with signal %d, %s coredump\n", ($? & 127), ($? & 128) ? 'with' : 'without';
+        printf "($outfile): ERROR. Child (mkvmerge split) process died with signal %d, %s coredump\n", ($? & 127), ($? & 128) ? 'with' : 'without';
         cleanup_temp();
         exit 1;
     } else {
         $split_exit_code = $? >> 8;
-        if ( $split_exit_code != 0 ) {
-            # There was an error.  Update the jobqueue table appropriately and exit.
-            updateStatus($dbh,$jobid,304,"mkvmerge (split) child process exited with error code $split_exit_code.");
+        if ( $split_exit_code == 1 ) {
+            # There was a warning during execution.  Update the jobqueue table, but continue.
+            updateStatus($dbh,$jobid,304,"($outfile): mkvmerge (split) child process completed with warnings.  The output file(s) may have errors.");
+        } elsif ( $split_exit_code == 2 ) {
+            # There was an error during execution.  Update the jobqueue table and exit.
+            updateStatus($dbh,$jobid,304,"($outfile): mkvmerge (split) child process exited with errors.  Stopping job.");
+            exit 1;
         } else {
             # ffmpeg call exited normally - update jobqueue comment to indicate runtime status
-            updateStatus($dbh,$jobid,4,"mkvmerge (split) conversion step completed, beginning mkvmerge merge.");
+            updateStatus($dbh,$jobid,4,"($outfile): mkvmerge (split) conversion step completed, beginning mkvmerge merge.");
         }
     }
 
@@ -380,21 +382,25 @@ if ( !$dryrun ) {
     # Now merge the proper files
     system "mkvmerge -o $output_dir/\"$outfile\".mkv $merge_string";
     if ( $? == -1 ) {
-        print "ERROR. Failed to execute mkvmerge (split) system call -> $merge_string\n";
+        print "($outfile): ERROR. Failed to execute mkvmerge (merge) system call -> $merge_string\n";
         cleanup_temp();
         exit 1;
     } elsif ( $? & 127 ) {
-        printf "ERROR. Child (mkvmerge merge) process died with signal %d, %s coredump\n", ($? & 127), ($? & 128) ? 'with' : 'without';
+        printf "($outfile): ERROR. Child (mkvmerge merge) process died with signal %d, %s coredump\n", ($? & 127), ($? & 128) ? 'with' : 'without';
         cleanup_temp();
         exit 1;
     } else {
         $merge_exit_code = $? >> 8;
-        if ( $merge_exit_code != 0 ) {
-            # There was an error.  Update the jobqueue table appropriately and exit.
-            updateStatus($dbh,$jobid,304,"mkvmerge (merge) child process exited with error code $merge_exit_code.");
+        if ( $merge_exit_code == 1 ) {
+            # There was a warning during execution.  Update the jobqueue table, but continue.
+            updateStatus($dbh,$jobid,304,"($outfile): mkvmerge (merge) child process completed with warnings.  The output file(s) may have errors.");
+        } elsif ( $merge_exit_code == 2 ) {
+            # There was an error during execution.  Update the jobqueue table and exit.
+            updateStatus($dbh,$jobid,304,"($outfile): mkvmerge (merge) child process exited with errors.  Stopping job.");
+            exit 1;
         } else {
             # ffmpeg call exited normally - update jobqueue comment to indicate runtime status
-            updateStatus($dbh,$jobid,4,"mkvmerge (merge) conversion step completed, beginning mkvmerge merge.");
+            updateStatus($dbh,$jobid,4,"($outfile): mkvmerge (merge) conversion step completed.");
         }
     }
 
@@ -403,7 +409,7 @@ if ( !$dryrun ) {
 }
 
 # let's set the exit status as successful
-updateStatus($dbh,$jobid,272,"Export finished.  Recording saved as $outfile.") if ( $jobid );
+updateStatus($dbh,$jobid,272,"($outfile): Export finished.") if ( $jobid );
 
 # disconnect from the database
 $dbh->disconnect();

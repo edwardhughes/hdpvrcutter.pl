@@ -39,6 +39,7 @@ use DBI;
 use File::Copy;
 use POSIX;
 use Getopt::Long;
+use File::Which;
 
 # Debugging modules
 use Data::Dumper;
@@ -51,7 +52,6 @@ use Data::Dumper;
 use sigtrap 'handler' => \&sigint_exit, 'INT';
 
 # Some variables
-my $fps = 29.97;
 my $cutlist_sub_str = "";
 my $ctr = 0;
 my $vidstart;
@@ -122,8 +122,6 @@ if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !$tit
     exit;
 }
 
-# @TODO: We need to perform some dependency checks before continuing.  1)ffmpeg 2)mkvmerge 3)mediainfo
-
 # Let's print some feedback about the supplied arguments
 print "Here's what I understand we'll be doing:\n";
 print "I'll be accessing the '$mysql_db' database on the host '$mysql_host'\n\tas the user '$mysql_user' (I'm not going to show you the password)\n";
@@ -144,8 +142,33 @@ if ( $verbose and $debug == 0 ) {
     $debug = 1;
 }
 
+        # Check for ffmpeg executable
+        my $ffmpeg_path = which('ffmpeg');
+        if ( !defined $ffmpeg_path ) {
+            print "ffmpeg not found in $ENV{'PATH'}\n";
+            exit 1;
+        } else {
+            print "ffmpeg found at $ffmpeg_path\n" if ( $debug >= 1 );
+        }
+        # Check for mkvmerge executable
+        my $mkvmerge_path = which('mkvmerge');
+        if ( !defined $mkvmerge_path ) {
+            print "mkvmerge not found in $ENV{'PATH'}\n";
+            exit 1;
+        } else {
+            print "mkvmerge found at $mkvmerge_path\n" if ( $debug >= 1 );
+        }
+        # Check for mediainfo executable
+        my $mediainfo_path = which('mediainfo');
+        if ( !defined $mediainfo_path ) {
+            print "mediainfo not found in $ENV{'PATH'}\n";
+            exit 1;
+        } else {
+            print "mediainfo found at $mediainfo_path\n" if ( $debug >= 1 );
+        }
 
 ## Proceed with the export
+print "\n\n########## Start export output ##########\n\n";
 
 # Add a trailing forward slash to the directories to be safe
 $recordings_dir .= '/';
@@ -186,6 +209,42 @@ if ( !@infoparts or length($infoparts[0]) == 0 or length($infoparts[1]) == 0 ) {
     exit 1; # We'll exit with a non-zero exit code.  The '1' has no significance at this time.
 }
 
+# Be sure to override the MythTV program name with the alternate search-title, if supplied
+$progname = $searchtitle if ( $searchtitle );
+
+# cleanup for tvdb query
+$progname =~ s/\\'//g;          # TVDB doesn't like apostrophes either
+$subtitle =~ s/\\'//g;
+
+# create the recording filename
+$filename = $chanid . "_" . $starttime;
+
+# some regex to make the filename play nice with the file system
+$filename =~ s/\ //g;
+$filename =~ s/://g;
+$filename =~ s/-//g;
+$filename .= ".mpg";
+$filename = "$recordings_dir" . $filename;
+print "Recording Filename: $filename\n";
+
+# Get the frame rate from the video
+my $fps = `mediainfo --Inform="Video;%FrameRate%" $filename`;
+print "Detected frame-rate of input video: $fps\n" if ( $debug >= 1 );
+
+$originalairdate = $infoparts[3];
+@date_array = split /\s+/, "$infoparts[1]";
+$recordedairdate = $date_array[0];
+
+if ( length($originalairdate) > 0 and length($recordedairdate) > 0 ) {
+    print "Original airdate: $originalairdate\n" if ( $debug >= 1 );
+    print "Recorded Date: $recordedairdate\n\n" if ( $debug >= 1 );
+} else {
+    print "Zero length query strings for thetvdb.com. Exiting...\n";
+    exit 1;
+}
+
+$airdate = $originalairdate ne '0000-00-00' ? $originalairdate : $recordedairdate;
+
 # Cutlist retrieval directly from database
 # We want a cutlist if available (it is user created), so we'll query for that first.
 $query_str = "SELECT mark,type FROM recordedmarkup WHERE chanid=? AND starttime=? AND ( type=0 OR type=1 ) ORDER BY mark ASC";
@@ -196,6 +255,7 @@ my @marks;
 my @types;
 my $secs;
 # Loop through each database response
+print "Cutlist/Skiplist query response:\n" if ( $debug >= 1 );
 while ( @markup = $query->fetchrow_array() ) {
     $secs = $markup[0] / $fps;
     print "\tmark: $markup[0] ($secs s) (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" if ( $debug >= 1 );
@@ -242,38 +302,6 @@ if ( $marks[0] == 0 or $types[0] == 0 or $types[0] == 5 ) {
 } else {
     $vidstart = 1;
 }
-
-# Be sure to override the MythTV program name with the alternate search-title, if supplied
-$progname = $searchtitle if ( $searchtitle );
-
-# cleanup for tvdb query
-$progname =~ s/\\'//g;          # TVDB doesn't like apostrophes either
-$subtitle =~ s/\\'//g;
-
-# create the recording filename
-$filename = $chanid . "_" . $starttime;
-
-# some regex to make the filename play nice with the file system
-$filename =~ s/\ //g;
-$filename =~ s/://g;
-$filename =~ s/-//g;
-$filename .= ".mpg";
-$filename = "$recordings_dir" . $filename;
-print "Recording Filename: $filename\n";
-
-$originalairdate = $infoparts[3];
-@date_array = split /\s+/, "$infoparts[1]";
-$recordedairdate = $date_array[0];
-
-if ( length($originalairdate) > 0 and length($recordedairdate) > 0 ) {
-    print "Original airdate: $originalairdate\n" if ( $debug >= 1 );
-    print "Recorded Date: $recordedairdate\n" if ( $debug >= 1 );
-} else {
-    print "Zero length query strings for thetvdb.com. Exiting...\n";
-    exit 1;
-}
-
-$airdate = $originalairdate ne '0000-00-00' ? $originalairdate : $recordedairdate;
 
 #####
 # Query thetvdb.com for program information

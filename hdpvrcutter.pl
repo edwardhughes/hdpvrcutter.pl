@@ -92,6 +92,7 @@ usage() if ( @ARGV < 1 or !GetOptions(
                                        'tempdir=s' => \$temp_dir,
                                        'dest=s' => \$output_dir,
                                        'jobid=i' => \$jobid,
+                                       'outfile=s' => \$user_outfile,
                                        'help|?|h' => \$help)
            );
 usage() if ( $help );
@@ -99,7 +100,7 @@ usage() if ( $help );
 sub usage
         {
             print "Unknown option: @_\n" if ( @_ );
-            print "usage: hdpvrcutter.pl --passwd=PASSWORD --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR --title=TITLE --subtitle=SUBTITLE [--verbose] [--debug] [--dryrun] [--host=HOSTNAME] [--dbname=DBNAME] [--user=USER] [--searchtitle SEARCH_TITLE] [--jobid JOBID] [--help|-?]\n";
+            print "usage: hdpvrcutter.pl --passwd=PASSWORD --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR --title=TITLE --subtitle=SUBTITLE [--outfile=DST_FILENAME] [--verbose] [--debug] [--dryrun] [--host=HOSTNAME] [--dbname=DBNAME] [--user=USER] [--searchtitle SEARCH_TITLE] [--jobid JOBID] [--help|-?]\n";
             exit;
         }
 
@@ -117,6 +118,7 @@ print "Must supply the full path the the temporary working directory [--tempdir=
 print "Must supply the full the path the to output destination directory [--dest=DESTINATION_DIR].\n" if ( !$output_dir );
 print "How can you export a show without a title?  [--title=TITLE]\n" if ( !$title );
 print "No subtitle.  I will assume we are exporting a movie? [--subtitle=SUBTITLE]\n" if ( !$subtitle );
+print "Output filename specified - no details will be looked up online." if ( $user_outfile );
 
 # Exit if not all of the required parameters are supplied
 if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !$title ) {
@@ -236,12 +238,16 @@ $originalairdate = $infoparts[3];
 @date_array = split /\s+/, "$infoparts[1]";
 $recordedairdate = $date_array[0];
 
-if ( length($originalairdate) > 0 and length($recordedairdate) > 0 ) {
-    print "Original airdate: $originalairdate\n" if ( $debug >= 1 );
-    print "Recorded Date: $recordedairdate\n\n" if ( $debug >= 1 );
-} else {
-    print "Zero length query strings for thetvdb.com. Exiting...\n";
-    exit 1;
+if ( ! $user_outfile ) {
+    # if the user specified the output filename, the thetvdb.com lookup is
+    # inhibited.
+    if ( length($originalairdate) > 0 and length($recordedairdate) > 0 ) {
+        print "Original airdate: $originalairdate\n" if ( $debug >= 1 );
+        print "Recorded Date: $recordedairdate\n\n" if ( $debug >= 1 );
+    } else {
+        print "Zero length query strings for thetvdb.com. Exiting...\n";
+        exit 1;
+    }
 }
 
 $airdate = $originalairdate ne '0000-00-00' ? $originalairdate : $recordedairdate;
@@ -308,26 +314,33 @@ if ( $marks[0] == 0 or $types[0] == 0 or $types[0] == 5 ) {
 # Query thetvdb.com for program information
 #####
 
-if ( $subtitle ne "" ) {
-    print "Beginning thetvdb.com lookup...\n";
-    @T = parse_episode_content($progname);
-    $S = $T[0];
-    $E = $T[1];
-    if ( length($S) == 0 or length($E) == 0 ) {
-        print "Empty season or episode number returned from thetvdb.com.  Exiting...\n";
-        exit 1;
+$outfile = '';
+if ( ! $user_outfile) {
+    # only query if the user didn't specify the output filename.
+    if ( $subtitle ne "" ) {
+        print "Beginning thetvdb.com lookup...\n";
+        @T = parse_episode_content($progname);
+        $S = $T[0];
+        $E = $T[1];
+        if ( length($S) == 0 or length($E) == 0 ) {
+            print "Empty season or episode number returned from thetvdb.com.  Exiting...\n";
+            exit 1;
+        }
+        # Print some useful information
+        print "\tSeason Number: $S\n";
+        print "\tEpisode Number: $E\n";
+        # Generate the output filename
+        $outfile = "$progname.S${S}E${E}";
+    } else {
+        print "Skipping thetvdb.com lookup...\n";
+        $outfile = "$progname";
     }
-    # Print some useful information
-    print "\tSeason Number: $S\n";
-    print "\tEpisode Number: $E\n";
-    # Generate the output filename
-    $outfile = "$progname.S${S}E${E}";
-} else {
-    print "Skipping thetvdb.com lookup...\n";
-    $outfile = "$progname";
+    # Display the output filename
+    print "The output file name is: \"$outfile.mkv\"\n";
 }
-# Display the output filename
-print "The output file name is: \"$outfile.mkv\"\n";
+else {
+    $outfile = $user_outfile;
+}
 
 
 #####

@@ -81,9 +81,10 @@ usage() if ( @ARGV < 1 or !GetOptions(
                                        'verbose' => \$verbose,
                                        'debug' => \$debug,
                                        'dryrun' => \$dryrun,
-                                       'title=s' => \$title,
+                                       'title:s' => \$title,
                                        'searchtitle=s' => \$searchtitle,
                                        'subtitle:s' => \$subtitle, # optional string - empty string is used to assume a movie
+                                       'basename:s' => \$user_filename,
                                        'host=s' => \$mysql_host,
                                        'dbname=s' => \$mysql_db,
                                        'user=s' => \$mysql_user,
@@ -96,32 +97,29 @@ usage() if ( @ARGV < 1 or !GetOptions(
                                        'help|?|h' => \$help)
            );
 usage() if ( $help );
+usage() if ( ! ( $title || $user_filename ) );
 
 sub usage
         {
             print "Unknown option: @_\n" if ( @_ );
-            print "usage: hdpvrcutter.pl --passwd=PASSWORD --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR --title=TITLE --subtitle=SUBTITLE [--outfile=DST_FILENAME] [--verbose] [--debug] [--dryrun] [--host=HOSTNAME] [--dbname=DBNAME] [--user=USER] [--searchtitle SEARCH_TITLE] [--jobid JOBID] [--help|-?]\n";
+            print "usage: hdpvrcutter.pl --passwd=PASSWORD --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR {--title=TITLE --subtitle=SUBTITLE | --basename=SRC_FILENAME} [--outfile=DST_FILENAME] [--verbose] [--debug] [--dryrun] [--host=HOSTNAME] [--dbname=DBNAME] [--user=USER] [--searchtitle SEARCH_TITLE] [--jobid JOBID] [--help|-?]\n";
             exit;
         }
-
-# Trim whitespace from title(s)
-$progname = $title;
-$progname =~ s/^\s+//;          # leading
-$progname =~ s/\s+$//;          # trailing
-$subtitle =~ s/^\s+//;          # leading
-$subtitle =~ s/\s+$//;          # trailing
 
 # Checks and error messages for required flags
 print "Must supply the password for the MySQL MythTV database [--passwd=PASSWORD] .\n" if ( !$mysql_password );
 print "Must supply the full path to the MythTV recordings directory [--recordings=RECORDINGS_DIR].\n" if ( !$recordings_dir );
 print "Must supply the full path the the temporary working directory [--tempdir=TEMPORARY_DIR].\n" if ( !$temp_dir );
 print "Must supply the full the path the to output destination directory [--dest=DESTINATION_DIR].\n" if ( !$output_dir );
-print "How can you export a show without a title?  [--title=TITLE]\n" if ( !$title );
-print "No subtitle.  I will assume we are exporting a movie? [--subtitle=SUBTITLE]\n" if ( !$subtitle );
+print "No subtitle.  I will assume we are exporting a movie? [--subtitle=SUBTITLE]\n" if ( $title && !$subtitle );
 print "Output filename specified - no details will be looked up online." if ( $user_outfile );
+print "You must specify either title or basename, but not both.\n" if ( $user_filename && $title );
 
 # Exit if not all of the required parameters are supplied
-if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !$title ) {
+if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !($title || $user_filename) ) {
+    exit;
+}
+if ($title && $user_filename) {
     exit;
 }
 
@@ -130,8 +128,14 @@ print "Here's what I understand we'll be doing:\n";
 print "I'll be accessing the '$mysql_db' database on the host '$mysql_host'\n\tas the user '$mysql_user' (I'm not going to show you the password)\n";
 print "I cannot update the MythTV jobqueue table because I was not supplied a jobid.\n" if ( !$jobid );
 print "The jobid supplied is: $jobid\n" if ( $jobid );
-print "I'll then export the recording: ";
-$subtitle ne "" ? print "$title - $subtitle" : print "$title";
+if ($title) {
+  print "I'll then export the recording: ";
+  $subtitle ne "" ? print "$title - $subtitle" : print "$title";
+}
+else {
+  print "I'll export the recording stored in the file: ";
+  print "$user_filename";
+}
 print "\n";
 print "One more thing...I'll be using the search string '$searchtitle'\n\tfor the tvdb query instead of '$title'.\n" if ( $searchtitle );
 print "***** DRY RUN.  WILL NOT PRODUCE ANY OUTPUT FILES. *****\n\n" if ( $dryrun );
@@ -173,33 +177,40 @@ if ( $verbose and $debug == 0 ) {
 ## Proceed with the export
 print "\n\n########## Start export output ##########\n\n";
 
-# Add a trailing forward slash to the directories to be safe
-$recordings_dir .= '/';
-$temp_dir .= '/';
-$output_dir .= '/';
-
-$apikey = "259FD33BA7C03A14";
-$THETVDB = "www.thetvdb.com";
-$global_user_agent = LWP::UserAgent->new;
-print "Program Name: $progname\n";
-print "Subtitle: $subtitle\n";
-$progname =~ s/\'/\\'/g;        # SQL doesn't like apostrophes
-$subtitle =~ s /\'/\\'/g;
-
 
 # Let's use perl's DBI module to access the database
 # Connect to MySQL database
 $dbh = DBI->connect("DBI:mysql:database=" . $mysql_db . ";host=" . $mysql_host, $mysql_user, $mysql_password);
 # prepare the query
-$query_str = "SELECT chanid,starttime,endtime,originalairdate FROM recorded WHERE title LIKE ? AND subtitle LIKE ?";
-$debug > 1 ? print "Query: $query_str\n" : 0;
-$query = $dbh->prepare($query_str);
-# Retrieve program information
-# execute query ->
-$query->execute($progname,$subtitle);
-# fetch response
-@infoparts = $query->fetchrow_array();
-$debug > 1 ? print "Infoparts: " . Dumper(@infoparts) . "\n" : 0;
+my @infoparts;
+my $basename;
+if (! $user_filename) {
+    $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE title LIKE ? AND subtitle LIKE ?";
+    $debug > 1 ? print "Query: $query_str\n" : 0;
+    $query = $dbh->prepare($query_str);
+    # Retrieve program information
+    # execute query ->
+    $query->execute($progname,$subtitle);
+    # fetch response
+    @infoparts = $query->fetchrow_array();
+    $debug > 1 ? print "Infoparts: " . Dumper(@infoparts) . "\n" : 0;
+    $basename = $infoparts[4];
+}
+else {
+    $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE basename = ?";
+    $debug > 1 ? print "Query: $query_str\n" : 0;
+    $query = $dbh->prepare($query_str);
+    # Retrieve program information
+    # execute query ->
+    $query->execute($user_filename);
+    # fetch response
+    @infoparts = $query->fetchrow_array();
+    $debug > 1 ? print "Infoparts: " . Dumper(@infoparts) . "\n" : 0;
+    $basename = $user_filename;
+    $title = $infoparts[5];
+    $subtitle = $infoparts[6];
+}
+
 # put the channel id and starttime into more intuitive variables
 $chanid = $infoparts[0];
 $starttime = $infoparts[1];
@@ -211,6 +222,29 @@ if ( !@infoparts or length($infoparts[0]) == 0 or length($infoparts[1]) == 0 ) {
     print "Indicated program does not exist in the mythconverg.recorded table.\nPlease check your inputs and try again.\nExiting...\n";
     exit 1; # We'll exit with a non-zero exit code.  The '1' has no significance at this time.
 }
+
+
+# Add a trailing forward slash to the directories to be safe
+$recordings_dir .= '/';
+$temp_dir .= '/';
+$output_dir .= '/';
+
+# Trim whitespace from title(s)
+$progname = $title;
+$progname =~ s/^\s+//;          # leading
+$progname =~ s/\s+$//;          # trailing
+$subtitle =~ s/^\s+//;          # leading
+$subtitle =~ s/\s+$//;          # trailing
+
+# Set up for TheTVDB.com lookup
+$apikey = "259FD33BA7C03A14";
+$THETVDB = "www.thetvdb.com";
+$global_user_agent = LWP::UserAgent->new;
+print "Program Name: $progname\n";
+print "Subtitle: $subtitle\n";
+$progname =~ s/\'/\\'/g;        # SQL doesn't like apostrophes
+$subtitle =~ s /\'/\\'/g;
+
 
 # Be sure to override the MythTV program name with the alternate search-title, if supplied
 $progname = $searchtitle if ( $searchtitle );
@@ -227,7 +261,7 @@ $filename =~ s/\ //g;
 $filename =~ s/://g;
 $filename =~ s/-//g;
 $filename .= ".mpg";
-$filename = "$recordings_dir" . $filename;
+$filename = "$recordings_dir" . $basename;  # use value extracted from the database
 print "Recording Filename: $filename\n";
 
 # Get the frame rate from the video

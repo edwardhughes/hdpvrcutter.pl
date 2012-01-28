@@ -77,7 +77,7 @@ my $jobid = '';
 my $help = '';
 
 # Print the help if requested or no arguments are used
-usage() if ( @ARGV < 1 or GetOptions(
+usage() if ( @ARGV < 1 or !GetOptions(
                                        'verbose' => \$verbose,
                                        'debug' => \$debug,
                                        'dryrun' => \$dryrun,
@@ -94,6 +94,7 @@ usage() if ( @ARGV < 1 or GetOptions(
                                        'jobid=i' => \$jobid,
                                        'help|?|h' => \$help)
            );
+usage() if ( $help );
 
 sub usage
         {

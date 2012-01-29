@@ -95,6 +95,7 @@ usage() if ( @ARGV < 1 or !GetOptions(
                                        'dest=s' => \$output_dir,
                                        'jobid=i' => \$jobid,
                                        'outfile=s' => \$user_outfile,
+                                       'cutlist=s' => \$user_cutlist,
                                        'help|?|h' => \$help)
            );
 # Show help message if requested by user
@@ -119,7 +120,7 @@ print "Output filename specified - no details will be looked up online.\n" if ( 
 print "You must specify either title or basename, but not both.\n" if ( $user_filename && $title );
 
 # Exit if not all of the required parameters are supplied
-if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !($title || $user_filename) ) {
+if ( !($mysql_password || $user_cutlist) or !$recordings_dir or !$temp_dir or !$output_dir or !($title || $user_filename) ) {
     exit;
 }
 if ($title && $user_filename) {
@@ -140,6 +141,9 @@ else {
   print "$user_filename";
 }
 print "\n";
+if ( $user_cutlist ) {
+  print "I'll be using the user-supplied cutlist instead of querying the MythTV database.\n";
+}
 print "One more thing...I'll be using the search string '$searchtitle'\n\tfor the tvdb query instead of '$title'.\n" if ( $searchtitle );
 print "***** DRY RUN.  WILL NOT PRODUCE ANY OUTPUT FILES. *****\n\n" if ( $dryrun );
 if ( $debug ) {

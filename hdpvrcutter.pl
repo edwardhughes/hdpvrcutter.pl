@@ -60,7 +60,7 @@ my $now = time();
 
 ## Process command line arguments
 
-# Delcare variables with default values
+# Declare variables with default values
 my $verbose = '';
 my $debug = '';
 my $dryrun = 0;
@@ -97,7 +97,9 @@ usage() if ( @ARGV < 1 or !GetOptions(
                                        'outfile=s' => \$user_outfile,
                                        'help|?|h' => \$help)
            );
+# Show help message if requested by user
 usage() if ( $help );
+# Show help message if user requests conflicting actions
 usage() if ( ! ( $title || $user_filename ) );
 
 sub usage

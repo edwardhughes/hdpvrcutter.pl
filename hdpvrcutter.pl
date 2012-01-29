@@ -106,7 +106,7 @@ usage() if ( ! ( $title || $user_filename ) );
 sub usage
         {
             print "Unknown option: @_\n" if ( @_ );
-            print "usage: hdpvrcutter.pl --passwd=PASSWORD --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR {--title=TITLE --subtitle=SUBTITLE | --basename=SRC_FILENAME} [--outfile=DST_FILENAME] [--verbose] [--debug] [--dryrun] [--host=HOSTNAME] [--dbname=DBNAME] [--user=USER] [--searchtitle SEARCH_TITLE] [--jobid JOBID] [--help|-?]\n";
+            print "usage: hdpvrcutter.pl --passwd=PASSWORD --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR {--title=TITLE --subtitle=SUBTITLE | --basename=SRC_FILENAME} [--outfile=DST_FILENAME] [--cutlist=CUTLIST_STRING] [--verbose] [--debug] [--dryrun] [--host=HOSTNAME] [--dbname=DBNAME] [--user=USER] [--searchtitle SEARCH_TITLE] [--jobid JOBID] [--help|-?]\n";
             exit;
         }
 
@@ -120,7 +120,7 @@ print "Output filename specified - no details will be looked up online.\n" if ( 
 print "You must specify either title or basename, but not both.\n" if ( $user_filename && $title );
 
 # Exit if not all of the required parameters are supplied
-if ( !($mysql_password || $user_cutlist) or !$recordings_dir or !$temp_dir or !$output_dir or !($title || $user_filename) ) {
+if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !($title || $user_filename) ) {
     exit;
 }
 if ($title && $user_filename) {
@@ -184,14 +184,13 @@ if ( !defined $mediainfo_path ) {
 ## Proceed with the export
 print "\n\n########## Start export output ##########\n\n";
 
-
 # Let's use perl's DBI module to access the database
 # Connect to MySQL database
 $dbh = DBI->connect("DBI:mysql:database=" . $mysql_db . ";host=" . $mysql_host, $mysql_user, $mysql_password);
 # prepare the query
 my @infoparts;
 my $basename;
-if (! $user_filename) {
+if ( ! $user_filename) {
     $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE title LIKE ? AND subtitle LIKE ?";
     $debug > 1 ? print "Query: $query_str\n" : 0;
     $query = $dbh->prepare($query_str);
@@ -202,8 +201,7 @@ if (! $user_filename) {
     @infoparts = $query->fetchrow_array();
     $debug > 1 ? print "Infoparts: " . Dumper(@infoparts) . "\n" : 0;
     $basename = $infoparts[4];
-}
-else {
+} else { # This query is for lookup based on the MythTV filename
     $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE basename = ?";
     $debug > 1 ? print "Query: $query_str\n" : 0;
     $query = $dbh->prepare($query_str);
@@ -230,7 +228,6 @@ if ( !@infoparts or length($infoparts[0]) == 0 or length($infoparts[1]) == 0 ) {
     exit 1; # We'll exit with a non-zero exit code.  The '1' has no significance at this time.
 }
 
-
 # Add a trailing forward slash to the directories to be safe
 $recordings_dir .= '/';
 $temp_dir .= '/';
@@ -251,7 +248,6 @@ print "Program Name: $progname\n";
 print "Subtitle: $subtitle\n";
 $progname =~ s/\'/\\'/g;        # SQL doesn't like apostrophes
 $subtitle =~ s /\'/\\'/g;
-
 
 # Be sure to override the MythTV program name with the alternate search-title, if supplied
 $progname = $searchtitle if ( $searchtitle );
@@ -293,69 +289,71 @@ if ( ! $user_outfile ) {
 
 $airdate = $originalairdate ne '0000-00-00' ? $originalairdate : $recordedairdate;
 
-# Cutlist retrieval directly from database
-# We want a cutlist if available (it is user created), so we'll query for that first.
-$query_str = "SELECT mark,type FROM recordedmarkup WHERE chanid=? AND starttime=? AND ( type=0 OR type=1 ) ORDER BY mark ASC";
-$debug > 1 ? print "Direct cutlist query string: $query_str\n" : 0;
-$query = $dbh->prepare($query_str) or die "Couldn't prepare statement: " . $dbh->errstr;
-$query->execute($chanid,$starttime);
-my @marks;
-my @types;
-my $secs;
-# Loop through each database response
-print "Cutlist/Skiplist query response:\n" if ( $debug >= 1 );
-while ( @markup = $query->fetchrow_array() ) {
-    $secs = $markup[0] / $fps;
-    print "\tmark: $markup[0] ($secs s) (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" if ( $debug >= 1 );
-    # store the markup frame number and type for later use
-    push(@marks,$markup[0]);
-    push(@types,$markup[1]);
-}
-# release the query
-$query->finish;
+        if ( ! $user_cutlist ) {
+            # Cutlist retrieval directly from database
+            # We want a cutlist if available (it is user created), so we'll query for that first.
+            $query_str = "SELECT mark,type FROM recordedmarkup WHERE chanid=? AND starttime=? AND ( type=0 OR type=1 ) ORDER BY mark ASC";
+            $debug > 1 ? print "Direct cutlist query string: $query_str\n" : 0;
+            $query = $dbh->prepare($query_str) or die "Couldn't prepare statement: " . $dbh->errstr;
+            $query->execute($chanid,$starttime);
+            my @marks;
+            my @types;
+            my $secs;
+            # Loop through each database response
+            print "Cutlist/Skiplist query response:\n" if ( $debug >= 1 );
+            while ( @markup = $query->fetchrow_array() ) {
+                $secs = $markup[0] / $fps;
+                print "\tmark: $markup[0] ($secs s) (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" if ( $debug >= 1 );
+                # store the markup frame number and type for later use
+                push(@marks,$markup[0]);
+                push(@types,$markup[1]);
+            }
+            # release the query
+            $query->finish;
 
-# A cutlist was not found.  Let's query for a commercial skip list.
-if ( !@marks ) {
-    $query_str = "SELECT mark,type FROM recordedmarkup WHERE chanid=? AND starttime=? AND ( type=4 OR type=5 ) ORDER BY mark ASC";
-    print "Direct skiplist query string: $query_str\n" if ( $debug > 1 );
-    $query = $dbh->prepare($query_str) or die "Couldn't prepare statement: " . $dbh->errstr;
-    $query->execute($chanid,$starttime);
-    # loop through each database response
-    while ( @markup = $query->fetchrow_array() ) {
-        $secs = $markup[0] / $fps;
-        print "\tmark: $markup[0] ($secs s) (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" if ( $debug >= 1 );
-        # store for later use
-        push(@marks,$markup[0]);
-        push(@types,$markup[1]);
-    }
-    # release the query
-    $query->finish;
-}
-if ( !@marks ) {
-    print "No cutlist or commercial skiplist found for specified recording.\nPlease check your inputs and/or create a cutlist then try again.  Exiting...\n";
-    exit 1;
-}
-foreach my $mark ( @marks ) {
-    # running commands with backquotes (``) will return the command output to perl.
-    $secs = $mark / $fps;
-    $cutlist_sub_str .= sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . ",";
-    $ctr++;
-}
-$ctr++;
-print "marks[0]: $marks[0]\n" if ( $debug > 1 );
-# We need to make sure that the first cut point is a cut-start, not a cut-end
-if ( $marks[0] == 0 or $types[0] == 0 or $types[0] == 5 ) {
-    $vidstart = 2;
-} else {
-    $vidstart = 1;
-}
+            # A cutlist was not found.  Let's query for a commercial skip list.
+            if ( !@marks ) {
+                $query_str = "SELECT mark,type FROM recordedmarkup WHERE chanid=? AND starttime=? AND ( type=4 OR type=5 ) ORDER BY mark ASC";
+                print "Direct skiplist query string: $query_str\n" if ( $debug > 1 );
+                $query = $dbh->prepare($query_str) or die "Couldn't prepare statement: " . $dbh->errstr;
+                $query->execute($chanid,$starttime);
+                # loop through each database response
+                while ( @markup = $query->fetchrow_array() ) {
+                    $secs = $markup[0] / $fps;
+                    print "\tmark: $markup[0] ($secs s) (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" if ( $debug >= 1 );
+                    # store for later use
+                    push(@marks,$markup[0]);
+                    push(@types,$markup[1]);
+                }
+                # release the query
+                $query->finish;
+            }
+            if ( !@marks ) {
+                print "No cutlist or commercial skiplist found for specified recording.\nPlease check your inputs and/or create a cutlist then try again.  Exiting...\n";
+                exit 1;
+            }
+            foreach my $mark ( @marks ) {
+                # running commands with backquotes (``) will return the command output to perl.
+                $secs = $mark / $fps;
+                $cutlist_sub_str .= sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . ",";
+                $ctr++;
+            }
+            $ctr++;
+            print "marks[0]: $marks[0]\n" if ( $debug > 1 );
+            # We need to make sure that the first cut point is a cut-start, not a cut-end
+            if ( $marks[0] == 0 or $types[0] == 0 or $types[0] == 5 ) {
+                $vidstart = 2;
+            } else {
+                $vidstart = 1;
+            }
+        }
 
 #####
 # Query thetvdb.com for program information
 #####
 
 $outfile = '';
-if ( ! $user_outfile) {
+if ( ! $user_outfile ) {
     # only query if the user didn't specify the output filename.
     if ( $subtitle ne "" ) {
         print "Beginning thetvdb.com lookup...\n";

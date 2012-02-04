@@ -246,16 +246,12 @@ print "Subtitle: $subtitle\n";
 $progname =~ s/\'/\\'/g;        # SQL doesn't like apostrophes
 $subtitle =~ s /\'/\\'/g;
 
-
 # Be sure to override the MythTV program name with the alternate search-title, if supplied
 $progname = $searchtitle if ( $searchtitle );
 
 # cleanup for tvdb query
 $progname =~ s/\\'//g;          # TVDB doesn't like apostrophes either
 $subtitle =~ s/\\'//g;
-
-# create the recording filename
-$filename = $chanid . "_" . $starttime;
 
 # some regex to make the filename play nice with the file system
 $filename =~ s/\ //g;
@@ -666,7 +662,7 @@ sub levenshtein
             # 1..$x and 1..$y
             #
             my $lev_result = $mat{$len1}{$len2};
-	    print "lev_result: $lev_result\n" if ( $debug > 1 );
+            print "lev_result: $lev_result\n" if ( $debug > 1 );
             #Now, I want to soften it a bit
             #So, i'm taking the distance between the strings, but not the added letters.
             my $string_length_diff = abs($len1 - $len2);
@@ -684,8 +680,8 @@ sub search_the_tv_db_for_series
             my $plot = "";
             my $tvdb_series_name = "";
             my $while_ctr = 0;
-	    
-	    print "Searching THE-TV-DB for series '$series'\n" if ( $debug > 1 );
+
+            print "Searching THE-TV-DB for series '$series'\n" if ( $debug > 1 );
 
             my $best_similarity = 1000000;
             #? marks the regexp as ungreedy (don't look for the longest, look for the first - which is actually IS a greedy algorithm...)
@@ -695,10 +691,10 @@ sub search_the_tv_db_for_series
                 print "Loop: $while_ctr\n" if ( $debug > 1 );
                 my $temp_series_id = $1;
                 my $temp_series_name = $2;
-		print "temp_series_id: $temp_series_id, temp_series_name: $temp_series_name\n" if ( $debug > 1 );
+                print "temp_series_id: $temp_series_id, temp_series_name: $temp_series_name\n" if ( $debug > 1 );
                 my $current_similarity = levenshtein($series, $temp_series_name);
                 print "Best similarity: $best_similarity Current: $current_similarity\n" if ( $debug > 1 );
-		my %map_hash = map { $_ => 1 } @$bad_series_array;
+                my %map_hash = map { $_ => 1 } @$bad_series_array;
                 if ( ($current_similarity < $best_similarity) and !(exists {map { $_ => 1 } @$bad_series_array}->{$temp_series_id}) ) {
                     if ($series_id eq "") {
                         print "Found a possible match for '$series' as '$temp_series_name' (ID $temp_series_id)\n" if ( $debug >= 1 );
@@ -757,9 +753,9 @@ sub parse_episode_content
             print "series_search_resp: " . Dumper(@series_search_resp) if ( $debug > 1 );
             my $series_id = $series_search_resp[0];
             my $series_resp_count = $series_search_resp[1];
-	    # Now we compose a search url for THETVDB which uses the returned series ID and the original air date to lookup the episode name...
+            # Now we compose a search url for THETVDB which uses the returned series ID and the original air date to lookup the episode name...
             my $content = get_http_response("http://".$THETVDB."/api/GetEpisodeByAirDate.php?apikey=$apikey&seriesid=$series_id&airdate=$airdate");
-	    # some crude parsing of the returned XML
+            # some crude parsing of the returned XML
             my @SEC = parse_episode_season_numbers($content);
             my $episode_number = $SEC[1];
             my $season_number = $SEC[0];
@@ -769,13 +765,13 @@ sub parse_episode_content
                 print "\n!!!!! No season/episode number match.  There were other series found.  Adding $series_id to the bad_series_array and trying the others...\n\n";
                 $series_ctr++;
                 push(@bad_series_array,$series_id);
-		print "bad_series_array:\n" . Dumper(@bad_series_array) . "\n" if ( $debug > 1 );
+                print "bad_series_array:\n" . Dumper(@bad_series_array) . "\n" if ( $debug > 1 );
                 @series_search_resp = search_the_tv_db_for_series($series_name,\@bad_series_array);
                 $series_id = $series_search_resp[0];
                 $series_resp_count = $series_search_resp[1];
-		# Again we search with the (hopefully) new series ID and original air date
+                # Again we search with the (hopefully) new series ID and original air date
                 $content = get_http_response("http://".$THETVDB."/api/GetEpisodeByAirDate.php?apikey=$apikey&seriesid=$series_id&airdate=$airdate");
-		# Again, some crude parsing of the returned XML
+                # Again, some crude parsing of the returned XML
                 @SEC = parse_episode_season_numbers($content);
                 $episode_number = $SEC[1];
                 $season_number = $SEC[0];

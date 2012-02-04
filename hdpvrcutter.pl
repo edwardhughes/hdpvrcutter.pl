@@ -271,7 +271,6 @@ $subtitle =~ s/\\'//g;
 
 # Compose the full-path filename
 $filename = "$recordings_dir" . $basename;  # use value extracted from the database
->>>>>>> master
 print "Recording Filename: $filename\n";
 
 # Get the frame rate from the video

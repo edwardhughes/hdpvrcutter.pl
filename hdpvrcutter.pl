@@ -269,9 +269,6 @@ $progname = $searchtitle if ( $searchtitle );
 $progname =~ s/\\'//g;          # TVDB doesn't like apostrophes either
 $subtitle =~ s/\\'//g;
 
-# create the recording filename
-#$filename = $user_filename ? $user_filename: $chanid . "_" . $starttime;
-
 # some regex to make the filename play nice with the file system
 $filename =~ s/\ //g;
 $filename =~ s/://g;

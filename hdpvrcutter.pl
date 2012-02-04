@@ -76,6 +76,7 @@ my $temp_dir = '';
 my $output_dir = '';
 my $jobid = '';
 my $help = '';
+my $basename;
 
 # Print the help if requested or no arguments are used
 usage() if ( @ARGV < 1 or !GetOptions(
@@ -194,7 +195,7 @@ if ( !$user_cutlist ) {
 $dbh = DBI->connect("DBI:mysql:database=" . $mysql_db . ";host=" . $mysql_host, $mysql_user, $mysql_password);
 # prepare the query
 my @infoparts;
-my $basename;
+
     if ( !$user_filename ) {
         $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE title LIKE ? AND subtitle LIKE ?";
         print "Query: $query_str\n\tprogname: $progname\n\tsubtitle: $subtitle\n" if ( $debug > 1 );
@@ -240,6 +241,7 @@ $recordedairdate = $date_array[0];
 
 } else {
     $progname = $title;
+    $basename = $user_filename;
 }
 
 # Add a trailing forward slash to the directories to be safe
@@ -274,7 +276,7 @@ $filename = "$recordings_dir" . $basename;  # use value extracted from the datab
 print "Recording Filename: $filename\n";
 
 # Get the frame rate from the video
-my $fps = `mediainfo --Inform="Video;%FrameRate%" $filename`;
+my $fps = `mediainfo --Inform="Video;%FrameRate%" "$filename"`;
 print "Detected frame-rate of input video: $fps\n" if ( $debug >= 1 );
 
 if ( !$user_outfile ) {

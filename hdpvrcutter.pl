@@ -253,11 +253,7 @@ $progname = $searchtitle if ( $searchtitle );
 $progname =~ s/\\'//g;          # TVDB doesn't like apostrophes either
 $subtitle =~ s/\\'//g;
 
-# some regex to make the filename play nice with the file system
-$filename =~ s/\ //g;
-$filename =~ s/://g;
-$filename =~ s/-//g;
-$filename .= ".mpg";
+# Compose the full-path filename
 $filename = "$recordings_dir" . $basename;  # use value extracted from the database
 print "Recording Filename: $filename\n";
 

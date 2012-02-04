@@ -116,7 +116,6 @@ print "Must supply the full path to the MythTV recordings directory [--recording
 print "Must supply the full path the the temporary working directory [--tempdir=TEMPORARY_DIR].\n" if ( !$temp_dir );
 print "Must supply the full the path the to output destination directory [--dest=DESTINATION_DIR].\n" if ( !$output_dir );
 print "No subtitle.  I will assume we are exporting a movie? [--subtitle=SUBTITLE]\n" if ( $title && !$subtitle );
-print "Output filename specified - no details will be looked up online.\n" if ( $user_outfile );
 print "You must specify either title OR basename, but not both.\n" if ( $user_filename && $title );
 
 # Exit if not all of the required parameters are supplied
@@ -132,6 +131,7 @@ print "Here's what I understand we'll be doing:\n";
 print "I'll be accessing the '$mysql_db' database on the host '$mysql_host'\n\tas the user '$mysql_user' (I'm not going to show you the password)\n";
 print "I cannot update the MythTV jobqueue table because I was not supplied a jobid.\n" if ( !$jobid );
 print "The jobid supplied is: $jobid\n" if ( $jobid );
+print "Output filename specified - no details will be looked up online.\n" if ( $user_outfile );
 if ($title) {
     print "I'll then export the recording: ";
     $subtitle ne "" ? print "$title - $subtitle" : print "$title";
@@ -143,7 +143,7 @@ print "\n";
 if ( $user_cutlist ) {
     print "I'll be using the user-supplied cutlist instead of querying the MythTV database.\n";
 }
-print "One more thing...I'll be using the search string '$searchtitle'\n\tfor the tvdb query instead of '$title'.\n" if ( $searchtitle );
+print "I'll be using the search string '$searchtitle'\n\tfor the tvdb query instead of '$title'.\n" if ( $searchtitle );
 print "***** DRY RUN.  WILL NOT PRODUCE ANY OUTPUT FILES. *****\n\n" if ( $dryrun );
 if ( $debug ) {
     $debug = 2;
@@ -191,31 +191,34 @@ $dbh = DBI->connect("DBI:mysql:database=" . $mysql_db . ";host=" . $mysql_host, 
 # prepare the query
 my @infoparts;
 my $basename;
-if ( !$user_filename ) {
-    $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE title LIKE ? AND subtitle LIKE ?";
-    print "Query: $query_str\n\tprogname: $progname\n\tsubtitle: $subtitle\n" if ( $debug > 1 );
-    $query = $dbh->prepare($query_str);
-    # Retrieve program information
-    # execute query ->
-    $query->execute($progname,$subtitle);
-    # fetch response
-    @infoparts = $query->fetchrow_array();
-    $debug > 1 ? print "Infoparts: " . Dumper(@infoparts) . "\n" : 0;
-    $basename = $infoparts[4];
-} else {       # This query is for lookup based on the MythTV filename
-    $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE basename = ?";
-    print "Query: $query_str\n" if ( $debug > 1 );
-    $query = $dbh->prepare($query_str);
-    # Retrieve program information
-    # execute query ->
-    $query->execute($user_filename);
-    # fetch response
-    @infoparts = $query->fetchrow_array();
-    $debug > 1 ? print "Infoparts: " . Dumper(@infoparts) . "\n" : 0;
-    $basename = $user_filename;
-    $title = $infoparts[5];
-    $subtitle = $infoparts[6];
-}
+
+if ( !$user_cutlist ) {
+    if ( !$user_filename ) {
+        $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE title LIKE ? AND subtitle LIKE ?";
+        print "Query: $query_str\n\tprogname: $progname\n\tsubtitle: $subtitle\n" if ( $debug > 1 );
+        $query = $dbh->prepare($query_str);
+        # Retrieve program information
+        # execute query ->
+        $query->execute($progname,$subtitle);
+        # fetch response
+        @infoparts = $query->fetchrow_array();
+        $debug > 1 ? print "Infoparts: " . Dumper(@infoparts) . "\n" : 0;
+        $basename = $infoparts[4];
+    } else {   # This query is for lookup based on the MythTV filename
+        $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE basename = ?";
+        print "Query: $query_str\n" if ( $debug > 1 );
+        $query = $dbh->prepare($query_str);
+        # Retrieve program information
+        # execute query ->
+        $query->execute($user_filename);
+        # fetch response
+        @infoparts = $query->fetchrow_array();
+        $debug > 1 ? print "Infoparts: " . Dumper(@infoparts) . "\n" : 0;
+        $basename = $user_filename;
+        $title = $infoparts[5];
+        $subtitle = $infoparts[6];
+    }
+
 
 # put the channel id and starttime into more intuitive variables
 $chanid = $infoparts[0];
@@ -227,6 +230,7 @@ $query->finish;
 if ( !@infoparts or length($infoparts[0]) == 0 or length($infoparts[1]) == 0 ) {
     print "Indicated program does not exist in the mythconverg.recorded table.\nPlease check your inputs and try again.\nExiting...\n";
     exit 1; # We'll exit with a non-zero exit code.  The '1' has no significance at this time.
+}
 }
 
 # Add a trailing forward slash to the directories to be safe
@@ -380,8 +384,8 @@ if ( !$user_outfile ) {
     if ( $subtitle ne "" ) {
         print "Beginning thetvdb.com lookup...\n";
         @T = parse_episode_content($progname);
-        $S = $T[0]; # series title
-        $E = $T[1]; # episode title
+        $S = $T[0];             # series title
+        $E = $T[1];             # episode title
         if ( length($S) == 0 or length($E) == 0 ) {
             print "Empty season or episode number returned from thetvdb.com.  Exiting...\n";
             exit 1;

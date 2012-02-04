@@ -183,6 +183,8 @@ if ( !defined $mediainfo_path ) {
 ## Proceed with the export
 print "\n\n########## Start export output ##########\n\n";
 
+# Stupid variable reassignment...too lazy to fix properly right now
+$progname = $title;
 # Let's use perl's DBI module to access the database
 # Connect to MySQL database
 $dbh = DBI->connect("DBI:mysql:database=" . $mysql_db . ";host=" . $mysql_host, $mysql_user, $mysql_password);
@@ -191,7 +193,7 @@ my @infoparts;
 my $basename;
 if ( ! $user_filename) {
     $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE title LIKE ? AND subtitle LIKE ?";
-    $debug > 1 ? print "Query: $query_str\n" : 0;
+    print "Query: $query_str\n\tprogname: $progname\n\tsubtitle: $subtitle\n" if ( $debug > 1 );
     $query = $dbh->prepare($query_str);
     # Retrieve program information
     # execute query ->
@@ -202,7 +204,7 @@ if ( ! $user_filename) {
     $basename = $infoparts[4];
 } else {       # This query is for lookup based on the MythTV filename
     $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE basename = ?";
-    $debug > 1 ? print "Query: $query_str\n" : 0;
+    print "Query: $query_str\n" if ( $debug > 1 );
     $query = $dbh->prepare($query_str);
     # Retrieve program information
     # execute query ->
@@ -233,7 +235,6 @@ $temp_dir .= '/';
 $output_dir .= '/';
 
 # Trim whitespace from title(s)
-$progname = $title;
 $progname =~ s/^\s+//;          # leading
 $progname =~ s/\s+$//;          # trailing
 $subtitle =~ s/^\s+//;          # leading
@@ -357,8 +358,8 @@ if ( ! $user_outfile ) {
     if ( $subtitle ne "" ) {
         print "Beginning thetvdb.com lookup...\n";
         @T = parse_episode_content($progname);
-        $S = $T[0];
-        $E = $T[1];
+        $S = $T[0]; # series title
+        $E = $T[1]; # episode title
         if ( length($S) == 0 or length($E) == 0 ) {
             print "Empty season or episode number returned from thetvdb.com.  Exiting...\n";
             exit 1;
@@ -600,7 +601,7 @@ sub levenshtein
             $s1 =~ s/\s+/ /g;
             $s2 =~ s/\s+/ /g;
 
-            $debug > 1 ? print "s1: '$s1'. s2: '$s2'\n" : 0;
+            print "string1 (user supplied): '$s1'. string2 (nth tvdb response): '$s2'\n" if ( $debug > 1 );
 
             my ($len1, $len2) = (length $s1, length $s2);
 
@@ -668,6 +669,7 @@ sub levenshtein
             # 1..$x and 1..$y
             #
             my $lev_result = $mat{$len1}{$len2};
+	    print "lev_result: $lev_result\n" if ( $debug > 1 );
             #Now, I want to soften it a bit
             #So, i'm taking the distance between the strings, but not the added letters.
             my $string_length_diff = abs($len1 - $len2);
@@ -677,8 +679,7 @@ sub levenshtein
 sub search_the_tv_db_for_series
         {
             my $series = $_[0];
-            my @bad_series_array = $_[1];
-            $debug >= 1 ? print "Searching THE-TV-DB for series '$series'\n" : 0;
+            my $bad_series_array = $_[1];
             my $series_for_url = $series;
             my $scontent = get_http_response("http://".$THETVDB."/api/GetSeries.php?seriesname=$series_for_url");
             my $series_id = "";
@@ -686,6 +687,8 @@ sub search_the_tv_db_for_series
             my $plot = "";
             my $tvdb_series_name = "";
             my $while_ctr = 0;
+
+	    print "Searching THE-TV-DB for series '$series'\n" if ( $debug > 1 );
 
             my $best_similarity = 1000000;
             #? marks the regexp as ungreedy (don't look for the longest, look for the first - which is actually IS a greedy algorithm...)
@@ -695,10 +698,11 @@ sub search_the_tv_db_for_series
                 print "Loop: $while_ctr\n" if ( $debug > 1 );
                 my $temp_series_id = $1;
                 my $temp_series_name = $2;
+		print "temp_series_id: $temp_series_id, temp_series_name: $temp_series_name\n" if ( $debug > 1 );
                 my $current_similarity = levenshtein($series, $temp_series_name);
-                print "++++++++++++++++++++++++++++++++++++++++++\n" if ( $debug > 1 );
                 print "Best similarity: $best_similarity Current: $current_similarity\n" if ( $debug > 1 );
-                if ( ($current_similarity < $best_similarity) and !(exists {map { $_ => 1 } @bad_series_array}->{$temp_series_id}) ) {
+		my %map_hash = map { $_ => 1 } @$bad_series_array;
+                if ( ($current_similarity < $best_similarity) and !(exists {map { $_ => 1 } @$bad_series_array}->{$temp_series_id}) ) {
                     if ($series_id eq "") {
                         print "Found a possible match for '$series' as '$temp_series_name' (ID $temp_series_id)\n" if ( $debug >= 1 );
                     } else {
@@ -751,25 +755,30 @@ sub parse_episode_content
         {
             my $series_name = $_[0];
             my $series_ctr = 1;
-            my @bad_series_array;
-            my @series_search_resp = search_the_tv_db_for_series($series_name,@bad_series_array);
-            print Dumper(@series_search_resp) if ( $debug > 1 );
+            my @bad_series_array = ("0");
+            my @series_search_resp = search_the_tv_db_for_series($series_name,\@bad_series_array);
+            print "series_search_resp: " . Dumper(@series_search_resp) if ( $debug > 1 );
             my $series_id = $series_search_resp[0];
             my $series_resp_count = $series_search_resp[1];
+	    # Now we compose a search url for THETVDB which uses the returned series ID and the original air date to lookup the episode name...
             my $content = get_http_response("http://".$THETVDB."/api/GetEpisodeByAirDate.php?apikey=$apikey&seriesid=$series_id&airdate=$airdate");
+	    # some crude parsing of the returned XML
             my @SEC = parse_episode_season_numbers($content);
             my $episode_number = $SEC[1];
             my $season_number = $SEC[0];
 
             # Now we need to test for empty responses, which would likely indicate that the wrong series was chosen
             while ( ( length($season_number) == 0 or length($episode_number) == 0 ) and $series_resp_count > 1 and $series_ctr < $series_resp_count ) {
-                print "No season/episode number match.  There were other series found, trying the others...\n";
+                print "\n!!!!! No season/episode number match.  There were other series found.  Adding $series_id to the bad_series_array and trying the others...\n\n";
                 $series_ctr++;
                 push(@bad_series_array,$series_id);
-                @series_search_resp = search_the_tv_db_for_series($series_name,@bad_series_array);
+		print "bad_series_array:\n" . Dumper(@bad_series_array) . "\n" if ( $debug > 1 );
+                @series_search_resp = search_the_tv_db_for_series($series_name,\@bad_series_array);
                 $series_id = $series_search_resp[0];
                 $series_resp_count = $series_search_resp[1];
+		# Again we search with the (hopefully) new series ID and original air date
                 $content = get_http_response("http://".$THETVDB."/api/GetEpisodeByAirDate.php?apikey=$apikey&seriesid=$series_id&airdate=$airdate");
+		# Again, some crude parsing of the returned XML
                 @SEC = parse_episode_season_numbers($content);
                 $episode_number = $SEC[1];
                 $season_number = $SEC[0];

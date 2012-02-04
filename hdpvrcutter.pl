@@ -84,18 +84,18 @@ usage() if ( @ARGV < 1 or !GetOptions(
                                       'debug' => \$debug,
                                       'dryrun' => \$dryrun,
                                       'title:s' => \$title,
-                                      'searchtitle=s' => \$searchtitle,
+                                      'searchtitle:s' => \$searchtitle,
                                       'subtitle:s' => \$subtitle, # optional string - empty string is used to assume a movie
                                       'basename:s' => \$user_filename,
-                                      'host=s' => \$mysql_host,
-                                      'dbname=s' => \$mysql_db,
-                                      'user=s' => \$mysql_user,
-                                      'passwd=s' => \$mysql_password,
+                                      'host:s' => \$mysql_host,
+                                      'dbname:s' => \$mysql_db,
+                                      'user:s' => \$mysql_user,
+                                      'passwd:s' => \$mysql_password,
                                       'recordings=s' => \$recordings_dir,
                                       'tempdir=s' => \$temp_dir,
                                       'dest=s' => \$output_dir,
-                                      'jobid=i' => \$jobid,
-                                      'outfile=s' => \$user_outfile,
+                                      'jobid:i' => \$jobid,
+                                      'outfile:s' => \$user_outfile,
                                       'cutlist:s' => \$user_cutlist,
                                       'help|?|h' => \$help)
            );
@@ -113,27 +113,38 @@ sub usage
         }
 
 # Checks and error messages for required flags
-print "Must supply the password for the MySQL MythTV database [--passwd=PASSWORD] .\n" if ( !$mysql_password );
-print "Must supply the full path to the MythTV recordings directory [--recordings=RECORDINGS_DIR].\n" if ( !$recordings_dir );
+print "Must supply the password for the MySQL MythTV database [--passwd=PASSWORD] .\n" if ( !$mysql_password && !$user_cutlist );
+print "Must supply the full path to the recordings directory [--recordings=RECORDINGS_DIR].\n" if ( !$recordings_dir );
 print "Must supply the full path the the temporary working directory [--tempdir=TEMPORARY_DIR].\n" if ( !$temp_dir );
 print "Must supply the full the path the to output destination directory [--dest=DESTINATION_DIR].\n" if ( !$output_dir );
 print "No subtitle.  I will assume we are exporting a movie? [--subtitle=SUBTITLE]\n" if ( $title && !$subtitle );
 print "You must specify either title OR basename, but not both.\n" if ( $user_filename && $title );
+print "To supply your own cutlist, you must also supply --basename and --outfile\n" if ( $user_cutlist && !($user_filename && $user_outfile) );
 
 # Exit if not all of the required parameters are supplied
-if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !($title || $user_filename) ) {
+if ( !$recordings_dir || !$temp_dir || !$output_dir ) {
+    exit;
+}
+if ( !($title || $user_filename) ) {
+    exit;
+}
+if ( !($mysql_password || $user_cutlist) ) {
     exit;
 }
 # Here is where we exit for conflicting filename options
 if ( $title && $user_filename ) {
-#    exit;
+    exit;
+}
+# Exit if not all user-cutlist options are present
+if ( $user_cutlist && !($user_filename && $user_outfile) ) {
+    exit;
 }
 
 # Let's print some feedback about the supplied arguments
 print "Here's what I understand we'll be doing:\n";
-print "I'll be accessing the '$mysql_db' database on the host '$mysql_host'\n\tas the user '$mysql_user' (I'm not going to show you the password)\n";
-print "I cannot update the MythTV jobqueue table because I was not supplied a jobid.\n" if ( !$jobid );
-print "The jobid supplied is: $jobid\n" if ( $jobid );
+print "I'll be accessing the '$mysql_db' database on the host '$mysql_host'\n\tas the user '$mysql_user' (I'm not going to show you the password)\n" if ( $mysql_password );
+print "I cannot update the MythTV jobqueue table because I was not supplied a jobid.\n" if ( $mysql_password && !$jobid );
+print "The jobid supplied is: $jobid\n" if ( $mysql_password && $jobid );
 print "Output filename specified - no details will be looked up online.\n" if ( $user_outfile );
 if ($title) {
     print "I'll then export the recording: ";
@@ -289,9 +300,8 @@ if ( !$user_outfile ) {
         print "Zero length query strings for thetvdb.com. Exiting...\n";
         exit 1;
     }
+    $airdate = $originalairdate ne '0000-00-00' ? $originalairdate : $recordedairdate;
 }
-
-$airdate = $originalairdate ne '0000-00-00' ? $originalairdate : $recordedairdate;
 
 if ( !$user_cutlist ) {
     # Cutlist retrieval directly from database
@@ -356,15 +366,17 @@ if ( !$user_cutlist ) {
     #    - the format is: vidstart::timecode_1,timecode_2,...,timecode_n
     #        - vidstart is an integer, 1 or 2, indicating which segment to be first
     #        - timecode_n is in the format HH:MM:SS.sss
-    if ( $user_cutlist =~ m/(\d)::((\d{2}:\d{2}:\d{2}(\.\d{0,3}){0,1}),*)+/ ) {
+    if ( $user_cutlist =~ m/(\d)::((\d{2}:\d{2}:\d{2}(\.\d{0,3})?,?)+)+/g ) {
         # First, we need to capture the 2 segments
         $vidstart = $1;
+        $cutlist_sub_str = $2;
+        print "User supplied vidstart: $vidstart\n" if ( $debug >= 1 );
         # ensure proper input of vidstart integer...
         if ( !($vidstart == 1 or $vidstart == 2) ) {
             print "The starting segment parameter must either be a 1 or 2.\n";
             exit 1;
         }
-        $cutlist_sub_str = $2;
+        print "User supplied cutlist_sub_str: $cutlist_sub_str\n" if ( $debug >= 1 );
         # @NOTE: Should we check for increasing timecodes?  How does mkvmerge handle non-increasing timecodes?
     } else {
         print "It seems that your supplied cutlist does not meet the required format: \n";
@@ -418,8 +430,7 @@ if ( $cutlist_sub_str eq "" ) {
     exit;
 } else {
     # Remove any trailing commas from the culist string
-    $cutlist_sub_str =~ s/^(.+),$//;
-    $cutlist_sub_str = $1;
+    $cutlist_sub_str =~ s/,$//g;
     print "mkvmerge timecodes: $cutlist_sub_str\n" if ( $debug >= 1 );
     print "\tctr: $ctr\n\tvidstart: $vidstart\n" if ( $debug > 1 );
 }
@@ -427,7 +438,7 @@ if ( $cutlist_sub_str eq "" ) {
 if ( !$dryrun ) {
     updateStatus($dbh,$jobid,4,"($outfile): Starting ffmpeg conversion.");
     # First we need to run the MPEG-TS file through ffmpeg to mux it into a Matroska container
-    my $ffmpeg_string = "ffmpeg -y -i $filename -vcodec copy -acodec copy -f matroska $temp_dir/temp_$now.mkv";
+    my $ffmpeg_string = "ffmpeg -y -i \"$filename\" -vcodec copy -acodec copy -f matroska $temp_dir/temp_$now.mkv";
     print "Calling ffmpeg to repackage video file into Matroska (mkv) container.\n" if ( $debug >= 1 );
     print "ffmpeg call: $ffmpeg_string\n" if ( $debug > 1 );
     system $ffmpeg_string;
@@ -524,7 +535,7 @@ if ( !$dryrun ) {
 updateStatus($dbh,$jobid,272,"($outfile): Export finished.") if ( $jobid );
 
 # disconnect from the database
-$dbh->disconnect();
+$dbh->disconnect() if ( $mysql_passwd );
 
 # Clean exit
 exit 0;

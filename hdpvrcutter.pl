@@ -95,13 +95,13 @@ usage() if ( @ARGV < 1 or !GetOptions(
                                       'dest=s' => \$output_dir,
                                       'jobid=i' => \$jobid,
                                       'outfile=s' => \$user_outfile,
-                                      'cutlist=s' => \$user_cutlist,
+                                      'cutlist:s' => \$user_cutlist,
                                       'help|?|h' => \$help)
            );
 # Show help message if requested by user
 usage() if ( $help );
 # Show help message if user requests conflicting actions
-usage() if ( ! ( $title || $user_filename ) );
+usage() if ( !( $title || $user_filename ) );
 
 sub usage
         {
@@ -117,13 +117,13 @@ print "Must supply the full path the the temporary working directory [--tempdir=
 print "Must supply the full the path the to output destination directory [--dest=DESTINATION_DIR].\n" if ( !$output_dir );
 print "No subtitle.  I will assume we are exporting a movie? [--subtitle=SUBTITLE]\n" if ( $title && !$subtitle );
 print "Output filename specified - no details will be looked up online.\n" if ( $user_outfile );
-print "You must specify either title or basename, but not both.\n" if ( $user_filename && $title );
+print "You must specify either title OR basename, but not both.\n" if ( $user_filename && $title );
 
 # Exit if not all of the required parameters are supplied
 if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !($title || $user_filename) ) {
     exit;
 }
-if ($title && $user_filename) {
+if ( $title && $user_filename ) {
     exit;
 }
 
@@ -191,7 +191,7 @@ $dbh = DBI->connect("DBI:mysql:database=" . $mysql_db . ";host=" . $mysql_host, 
 # prepare the query
 my @infoparts;
 my $basename;
-if ( ! $user_filename) {
+if ( !$user_filename ) {
     $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE title LIKE ? AND subtitle LIKE ?";
     print "Query: $query_str\n\tprogname: $progname\n\tsubtitle: $subtitle\n" if ( $debug > 1 );
     $query = $dbh->prepare($query_str);
@@ -275,7 +275,7 @@ $originalairdate = $infoparts[3];
 @date_array = split /\s+/, "$infoparts[1]";
 $recordedairdate = $date_array[0];
 
-if ( ! $user_outfile ) {
+if ( !$user_outfile ) {
     # if the user specified the output filename, the thetvdb.com lookup is
     # inhibited.
     if ( length($originalairdate) > 0 and length($recordedairdate) > 0 ) {
@@ -289,7 +289,7 @@ if ( ! $user_outfile ) {
 
 $airdate = $originalairdate ne '0000-00-00' ? $originalairdate : $recordedairdate;
 
-if ( ! $user_cutlist ) {
+if ( !$user_cutlist ) {
     # Cutlist retrieval directly from database
     # We want a cutlist if available (it is user created), so we'll query for that first.
     $query_str = "SELECT mark,type FROM recordedmarkup WHERE chanid=? AND starttime=? AND ( type=0 OR type=1 ) ORDER BY mark ASC";
@@ -346,6 +346,28 @@ if ( ! $user_cutlist ) {
     } else {
         $vidstart = 1;
     }
+} else {
+    # The user supplied a cutlist
+    # We should validate it before proceeding
+    #    - the format is: vidstart::timecode_1,timecode_2,...,timecode_n
+    #        - vidstart is an integer, 1 or 2, indicating which segment to be first
+    #        - timecode_n is in the format HH:MM:SS.sss
+    if ( $user_cutlist =~ m/(\d)::((\d{2}:\d{2}:\d{2}(\.\d{0,3}){0,1}),*)+/ ) {
+        # First, we need to capture the 2 segments
+        $vidstart = $1;
+        # ensure proper input of vidstart integer...
+        if ( !($vidstart == 1 or $vidstart == 2) ) {
+            print "The starting segment parameter must either be a 1 or 2.\n";
+            exit 1;
+        }
+        $cutlist_sub_str = $2;
+        # @NOTE: Should we check for increasing timecodes?  How does mkvmerge handle non-increasing timecodes?
+    } else {
+        print "It seems that your supplied cutlist does not meet the required format: \n";
+        print "\tvidstart::timecode_1,timecode_2,...,timecode_n\n";
+        print "\twhere vidstart=(1,2) and\n\ttimecode_n=HH:MM:SS(.sss)\n\n";
+        exit 1;
+    }
 }
 
 #####
@@ -353,7 +375,7 @@ if ( ! $user_cutlist ) {
 #####
 
 $outfile = '';
-if ( ! $user_outfile ) {
+if ( !$user_outfile ) {
     # only query if the user didn't specify the output filename.
     if ( $subtitle ne "" ) {
         print "Beginning thetvdb.com lookup...\n";
@@ -388,7 +410,7 @@ if ( ! $user_outfile ) {
 if ( $cutlist_sub_str eq "" ) {
     print "There seems to be no cutlist or skiplist present for this recording. EXITING!!!\n";
     # Update status and comment fields in the jobqueue table to inform the user of the exit reason
-    updateStatus($dbh,$jobid,288,"There was no cut/skip list found for the recording.") if ( $jobid );
+    updateStatus($dbh,$jobid,288,"There was no cut/skip list" . $user_cutlist : "supplied" ? "found"  . " for the recording.") if ( $jobid );
     exit;
 } else {
     # Remove any trailing commas from the culist string

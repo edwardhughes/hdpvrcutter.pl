@@ -100,7 +100,8 @@ usage() if ( @ARGV < 1 or !GetOptions(
            );
 # Show help message if requested by user
 usage() if ( $help );
-# Show help message if user requests conflicting actions
+# Show help message if user requests conflicting actions (show main
+# help message here, exit below after showing additional help message)
 usage() if ( !( $title || $user_filename ) );
 
 sub usage
@@ -122,8 +123,9 @@ print "You must specify either title OR basename, but not both.\n" if ( $user_fi
 if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !($title || $user_filename) ) {
     exit;
 }
+# Here is where we exit for conflicting filename options
 if ( $title && $user_filename ) {
-    exit;
+#    exit;
 }
 
 # Let's print some feedback about the supplied arguments
@@ -150,7 +152,7 @@ if ( $debug ) {
 } else {
     $debug = 0;
 }
-if ( $verbose and $debug == 0 ) {
+if ( $verbose && $debug == 0 ) {
     print "Verbose mode\n";
     $debug = 1;
 }
@@ -185,14 +187,14 @@ print "\n\n########## Start export output ##########\n\n";
 
 # Stupid variable reassignment...too lazy to fix properly right now
 $progname = $title;
+
+if ( !$user_cutlist ) {
 # Let's use perl's DBI module to access the database
 # Connect to MySQL database
 $dbh = DBI->connect("DBI:mysql:database=" . $mysql_db . ";host=" . $mysql_host, $mysql_user, $mysql_password);
 # prepare the query
 my @infoparts;
 my $basename;
-
-if ( !$user_cutlist ) {
     if ( !$user_filename ) {
         $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE title LIKE ? AND subtitle LIKE ?";
         print "Query: $query_str\n\tprogname: $progname\n\tsubtitle: $subtitle\n" if ( $debug > 1 );
@@ -231,6 +233,13 @@ if ( !@infoparts or length($infoparts[0]) == 0 or length($infoparts[1]) == 0 ) {
     print "Indicated program does not exist in the mythconverg.recorded table.\nPlease check your inputs and try again.\nExiting...\n";
     exit 1; # We'll exit with a non-zero exit code.  The '1' has no significance at this time.
 }
+
+$originalairdate = $infoparts[3];
+@date_array = split /\s+/, "$infoparts[1]";
+$recordedairdate = $date_array[0];
+
+} else {
+    $progname = $title;
 }
 
 # Add a trailing forward slash to the directories to be safe
@@ -261,7 +270,7 @@ $progname =~ s/\\'//g;          # TVDB doesn't like apostrophes either
 $subtitle =~ s/\\'//g;
 
 # create the recording filename
-$filename = $chanid . "_" . $starttime;
+#$filename = $user_filename ? $user_filename: $chanid . "_" . $starttime;
 
 # some regex to make the filename play nice with the file system
 $filename =~ s/\ //g;
@@ -274,10 +283,6 @@ print "Recording Filename: $filename\n";
 # Get the frame rate from the video
 my $fps = `mediainfo --Inform="Video;%FrameRate%" $filename`;
 print "Detected frame-rate of input video: $fps\n" if ( $debug >= 1 );
-
-$originalairdate = $infoparts[3];
-@date_array = split /\s+/, "$infoparts[1]";
-$recordedairdate = $date_array[0];
 
 if ( !$user_outfile ) {
     # if the user specified the output filename, the thetvdb.com lookup is
@@ -414,7 +419,7 @@ if ( !$user_outfile ) {
 if ( $cutlist_sub_str eq "" ) {
     print "There seems to be no cutlist or skiplist present for this recording. EXITING!!!\n";
     # Update status and comment fields in the jobqueue table to inform the user of the exit reason
-    updateStatus($dbh,$jobid,288,"There was no cut/skip list" . $user_cutlist : "supplied" ? "found"  . " for the recording.") if ( $jobid );
+    updateStatus($dbh,$jobid,288,"There was no cut/skip list" . $user_cutlist ? "supplied" : "found"  . " for the recording.") if ( $jobid );
     exit;
 } else {
     # Remove any trailing commas from the culist string
@@ -695,7 +700,7 @@ sub levenshtein
             # 1..$x and 1..$y
             #
             my $lev_result = $mat{$len1}{$len2};
-	    print "lev_result: $lev_result\n" if ( $debug > 1 );
+            print "lev_result: $lev_result\n" if ( $debug > 1 );
             #Now, I want to soften it a bit
             #So, i'm taking the distance between the strings, but not the added letters.
             my $string_length_diff = abs($len1 - $len2);
@@ -714,7 +719,7 @@ sub search_the_tv_db_for_series
             my $tvdb_series_name = "";
             my $while_ctr = 0;
 
-	    print "Searching THE-TV-DB for series '$series'\n" if ( $debug > 1 );
+            print "Searching THE-TV-DB for series '$series'\n" if ( $debug > 1 );
 
             my $best_similarity = 1000000;
             #? marks the regexp as ungreedy (don't look for the longest, look for the first - which is actually IS a greedy algorithm...)
@@ -724,10 +729,10 @@ sub search_the_tv_db_for_series
                 print "Loop: $while_ctr\n" if ( $debug > 1 );
                 my $temp_series_id = $1;
                 my $temp_series_name = $2;
-		print "temp_series_id: $temp_series_id, temp_series_name: $temp_series_name\n" if ( $debug > 1 );
+                print "temp_series_id: $temp_series_id, temp_series_name: $temp_series_name\n" if ( $debug > 1 );
                 my $current_similarity = levenshtein($series, $temp_series_name);
                 print "Best similarity: $best_similarity Current: $current_similarity\n" if ( $debug > 1 );
-		my %map_hash = map { $_ => 1 } @$bad_series_array;
+                my %map_hash = map { $_ => 1 } @$bad_series_array;
                 if ( ($current_similarity < $best_similarity) and !(exists {map { $_ => 1 } @$bad_series_array}->{$temp_series_id}) ) {
                     if ($series_id eq "") {
                         print "Found a possible match for '$series' as '$temp_series_name' (ID $temp_series_id)\n" if ( $debug >= 1 );
@@ -786,9 +791,9 @@ sub parse_episode_content
             print "series_search_resp: " . Dumper(@series_search_resp) if ( $debug > 1 );
             my $series_id = $series_search_resp[0];
             my $series_resp_count = $series_search_resp[1];
-	    # Now we compose a search url for THETVDB which uses the returned series ID and the original air date to lookup the episode name...
+            # Now we compose a search url for THETVDB which uses the returned series ID and the original air date to lookup the episode name...
             my $content = get_http_response("http://".$THETVDB."/api/GetEpisodeByAirDate.php?apikey=$apikey&seriesid=$series_id&airdate=$airdate");
-	    # some crude parsing of the returned XML
+            # some crude parsing of the returned XML
             my @SEC = parse_episode_season_numbers($content);
             my $episode_number = $SEC[1];
             my $season_number = $SEC[0];
@@ -798,13 +803,13 @@ sub parse_episode_content
                 print "\n!!!!! No season/episode number match.  There were other series found.  Adding $series_id to the bad_series_array and trying the others...\n\n";
                 $series_ctr++;
                 push(@bad_series_array,$series_id);
-		print "bad_series_array:\n" . Dumper(@bad_series_array) . "\n" if ( $debug > 1 );
+                print "bad_series_array:\n" . Dumper(@bad_series_array) . "\n" if ( $debug > 1 );
                 @series_search_resp = search_the_tv_db_for_series($series_name,\@bad_series_array);
                 $series_id = $series_search_resp[0];
                 $series_resp_count = $series_search_resp[1];
-		# Again we search with the (hopefully) new series ID and original air date
+                # Again we search with the (hopefully) new series ID and original air date
                 $content = get_http_response("http://".$THETVDB."/api/GetEpisodeByAirDate.php?apikey=$apikey&seriesid=$series_id&airdate=$airdate");
-		# Again, some crude parsing of the returned XML
+                # Again, some crude parsing of the returned XML
                 @SEC = parse_episode_season_numbers($content);
                 $episode_number = $SEC[1];
                 $season_number = $SEC[0];

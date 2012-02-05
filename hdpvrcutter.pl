@@ -159,14 +159,15 @@ if ( $user_cutlist ) {
 }
 print "I'll be using the search string '$searchtitle'\n\tfor the tvdb query instead of '$title'.\n" if ( $searchtitle );
 print "***** DRY RUN.  WILL NOT PRODUCE ANY OUTPUT FILES. *****\n\n" if ( $dryrun );
+if ( $verbose && $debug == 0 ) {
+    print "Verbose mode\n\n";
+    $debug = 1;
+}
 if ( $debug ) {
+    print "Debug mode\n\n";
     $debug = 2;
 } else {
     $debug = 0;
-}
-if ( $verbose && $debug == 0 ) {
-    print "Verbose mode\n";
-    $debug = 1;
 }
 
 # Check for ffmpeg executable
@@ -377,7 +378,13 @@ if ( !$user_cutlist ) {
             exit 1;
         }
         print "User supplied cutlist_sub_str: $cutlist_sub_str\n" if ( $debug >= 1 );
-        # @NOTE: Should we check for increasing timecodes?  How does mkvmerge handle non-increasing timecodes?
+        # We need to know how many segments there are to set the $ctr
+        # variable.
+        my @split_cutlist = split(/,/, $cutlist_sub_str);
+        $ctr = scalar(@split_cutlist) + 1;
+        print "Detected $ctr split segments.\n" if ( $debug >= 1 );
+        # @NOTE: Should we check for increasing timecodes?  How does
+        # mkvmerge handle non-increasing timecodes?
     } else {
         print "It seems that your supplied cutlist does not meet the required format: \n";
         print "\tvidstart::timecode_1,timecode_2,...,timecode_n\n";
@@ -496,7 +503,7 @@ if ( !$dryrun ) {
     } else {
         $merge_string = "$temp_dir/split_$now-002.mkv";
     }
-    for ( $n=$vidstart+2; $n<=$ctr; $n+=2 ) {
+    for ( my $n=$vidstart+2; $n<=$ctr; $n+=2 ) {
         print "n: $n\n" if ( $debug > 1 );
         $merge_string = $merge_string . " +$temp_dir/split_$now-" . sprintf("%03d",$n) . ".mkv";
     }

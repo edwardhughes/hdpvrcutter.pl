@@ -377,6 +377,7 @@ if ( !$user_cutlist ) {
             print "The starting segment parameter must either be a 1 or 2.\n";
             exit 1;
         }
+        $cutlist_sub_str =~ s/,$//g;
         print "User supplied cutlist_sub_str: $cutlist_sub_str\n";
         # We need to know how many segments there are to set the $ctr
         # variable.
@@ -436,7 +437,7 @@ if ( $cutlist_sub_str eq "" ) {
     updateStatus($dbh,$jobid,288,"There was no cut/skip list" . $user_cutlist ? "supplied" : "found"  . " for the recording.") if ( $jobid );
     exit;
 } else {
-    # Remove any trailing commas from the culist string
+    # Remove any trailing commas from the cutlist string
     $cutlist_sub_str =~ s/,$//g;
     print "mkvmerge timecodes: $cutlist_sub_str\n" if ( $debug >= 1 );
     print "\tctr: $ctr\n\tvidstart: $vidstart\n" if ( $debug > 1 );

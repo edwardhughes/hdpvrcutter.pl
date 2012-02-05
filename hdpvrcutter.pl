@@ -60,7 +60,7 @@ my $now = time();
 
 ## Process command line arguments
 
-# Delcare variables with default values
+# Declare variables with default values
 my $verbose = '';
 my $debug = '';
 my $dryrun = 0;
@@ -76,78 +76,98 @@ my $temp_dir = '';
 my $output_dir = '';
 my $jobid = '';
 my $help = '';
+my $basename;
 
 # Print the help if requested or no arguments are used
 usage() if ( @ARGV < 1 or !GetOptions(
-                                       'verbose' => \$verbose,
-                                       'debug' => \$debug,
-                                       'dryrun' => \$dryrun,
-                                       'title:s' => \$title,
-                                       'searchtitle=s' => \$searchtitle,
-                                       'subtitle:s' => \$subtitle, # optional string - empty string is used to assume a movie
-                                       'basename:s' => \$user_filename,
-                                       'host=s' => \$mysql_host,
-                                       'dbname=s' => \$mysql_db,
-                                       'user=s' => \$mysql_user,
-                                       'passwd=s' => \$mysql_password,
-                                       'recordings=s' => \$recordings_dir,
-                                       'tempdir=s' => \$temp_dir,
-                                       'dest=s' => \$output_dir,
-                                       'jobid=i' => \$jobid,
-                                       'outfile=s' => \$user_outfile,
-                                       'help|?|h' => \$help)
+                                      'verbose' => \$verbose,
+                                      'debug' => \$debug,
+                                      'dryrun' => \$dryrun,
+                                      'title:s' => \$title,
+                                      'searchtitle:s' => \$searchtitle,
+                                      'subtitle:s' => \$subtitle, # optional string - empty string is used to assume a movie
+                                      'basename:s' => \$user_filename,
+                                      'host:s' => \$mysql_host,
+                                      'dbname:s' => \$mysql_db,
+                                      'user:s' => \$mysql_user,
+                                      'passwd:s' => \$mysql_password,
+                                      'recordings=s' => \$recordings_dir,
+                                      'tempdir=s' => \$temp_dir,
+                                      'dest=s' => \$output_dir,
+                                      'jobid:i' => \$jobid,
+                                      'outfile:s' => \$user_outfile,
+                                      'cutlist:s' => \$user_cutlist,
+                                      'help|?|h' => \$help)
            );
+# Show help message if requested by user
 usage() if ( $help );
-usage() if ( ! ( $title || $user_filename ) );
+# Show help message if user requests conflicting actions (show main
+# help message here, exit below after showing additional help message)
+usage() if ( !( $title || $user_filename ) );
 
 sub usage
         {
             print "Unknown option: @_\n" if ( @_ );
-            print "usage: hdpvrcutter.pl --passwd=PASSWORD --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR {--title=TITLE --subtitle=SUBTITLE | --basename=SRC_FILENAME} [--outfile=DST_FILENAME] [--verbose] [--debug] [--dryrun] [--host=HOSTNAME] [--dbname=DBNAME] [--user=USER] [--searchtitle SEARCH_TITLE] [--jobid JOBID] [--help|-?]\n";
+            print "usage: hdpvrcutter.pl --passwd=PASSWORD --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR {--title=TITLE --subtitle=SUBTITLE | --basename=SRC_FILENAME} [--outfile=DST_FILENAME] [--cutlist=CUTLIST_STRING] [--verbose] [--debug] [--dryrun] [--host=HOSTNAME] [--dbname=DBNAME] [--user=USER] [--searchtitle SEARCH_TITLE] [--jobid JOBID] [--help|-?]\n";
             exit;
         }
 
 # Checks and error messages for required flags
-print "Must supply the password for the MySQL MythTV database [--passwd=PASSWORD] .\n" if ( !$mysql_password );
-print "Must supply the full path to the MythTV recordings directory [--recordings=RECORDINGS_DIR].\n" if ( !$recordings_dir );
+print "Must supply the password for the MySQL MythTV database [--passwd=PASSWORD] .\n" if ( !$mysql_password && !$user_cutlist );
+print "Must supply the full path to the recordings directory [--recordings=RECORDINGS_DIR].\n" if ( !$recordings_dir );
 print "Must supply the full path the the temporary working directory [--tempdir=TEMPORARY_DIR].\n" if ( !$temp_dir );
 print "Must supply the full the path the to output destination directory [--dest=DESTINATION_DIR].\n" if ( !$output_dir );
 print "No subtitle.  I will assume we are exporting a movie? [--subtitle=SUBTITLE]\n" if ( $title && !$subtitle );
-print "Output filename specified - no details will be looked up online.\n" if ( $user_outfile );
-print "You must specify either title or basename, but not both.\n" if ( $user_filename && $title );
+print "You must specify either title OR basename, but not both.\n" if ( $user_filename && $title );
+print "To supply your own cutlist, you must also supply --basename and --outfile\n" if ( $user_cutlist && !($user_filename && $user_outfile) );
 
 # Exit if not all of the required parameters are supplied
-if ( !$mysql_password or !$recordings_dir or !$temp_dir or !$output_dir or !($title || $user_filename) ) {
+if ( !$recordings_dir || !$temp_dir || !$output_dir ) {
     exit;
 }
-if ($title && $user_filename) {
+if ( !($title || $user_filename) ) {
+    exit;
+}
+if ( !($mysql_password || $user_cutlist) ) {
+    exit;
+}
+# Here is where we exit for conflicting filename options
+if ( $title && $user_filename ) {
+    exit;
+}
+# Exit if not all user-cutlist options are present
+if ( $user_cutlist && !($user_filename && $user_outfile) ) {
     exit;
 }
 
 # Let's print some feedback about the supplied arguments
 print "Here's what I understand we'll be doing:\n";
-print "I'll be accessing the '$mysql_db' database on the host '$mysql_host'\n\tas the user '$mysql_user' (I'm not going to show you the password)\n";
-print "I cannot update the MythTV jobqueue table because I was not supplied a jobid.\n" if ( !$jobid );
-print "The jobid supplied is: $jobid\n" if ( $jobid );
+print "I'll be accessing the '$mysql_db' database on the host '$mysql_host'\n\tas the user '$mysql_user' (I'm not going to show you the password)\n" if ( $mysql_password );
+print "I cannot update the MythTV jobqueue table because I was not supplied a jobid.\n" if ( $mysql_password && !$jobid );
+print "The jobid supplied is: $jobid\n" if ( $mysql_password && $jobid );
+print "Output filename specified - no details will be looked up online.\n" if ( $user_outfile );
 if ($title) {
-  print "I'll then export the recording: ";
-  $subtitle ne "" ? print "$title - $subtitle" : print "$title";
-}
-else {
-  print "I'll export the recording stored in the file: ";
-  print "$user_filename";
+    print "I'll then export the recording: ";
+    $subtitle ne "" ? print "$title - $subtitle" : print "$title";
+} else {
+    print "I'll export the recording stored in the file: ";
+    print "$user_filename";
 }
 print "\n";
-print "One more thing...I'll be using the search string '$searchtitle'\n\tfor the tvdb query instead of '$title'.\n" if ( $searchtitle );
+if ( $user_cutlist ) {
+    print "I'll be using the user-supplied cutlist instead of querying the MythTV database.\n";
+}
+print "I'll be using the search string '$searchtitle'\n\tfor the tvdb query instead of '$title'.\n" if ( $searchtitle );
 print "***** DRY RUN.  WILL NOT PRODUCE ANY OUTPUT FILES. *****\n\n" if ( $dryrun );
+if ( $verbose && $debug == 0 ) {
+    print "Verbose mode\n\n";
+    $debug = 1;
+}
 if ( $debug ) {
+    print "Debug mode\n\n";
     $debug = 2;
 } else {
     $debug = 0;
-}
-if ( $verbose and $debug == 0 ) {
-    print "Verbose mode\n";
-    $debug = 1;
 }
 
 # Check for ffmpeg executable
@@ -180,38 +200,40 @@ print "\n\n########## Start export output ##########\n\n";
 
 # Stupid variable reassignment...too lazy to fix properly right now
 $progname = $title;
+
+if ( !$user_cutlist ) {
 # Let's use perl's DBI module to access the database
 # Connect to MySQL database
 $dbh = DBI->connect("DBI:mysql:database=" . $mysql_db . ";host=" . $mysql_host, $mysql_user, $mysql_password);
 # prepare the query
 my @infoparts;
-my $basename;
-if (! $user_filename) {
-    $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE title LIKE ? AND subtitle LIKE ?";
-    print "Query: $query_str\n\tprogname: $progname\n\tsubtitle: $subtitle\n" if ( $debug > 1 );
-    $query = $dbh->prepare($query_str);
-    # Retrieve program information
-    # execute query ->
-    $query->execute($progname,$subtitle);
-    # fetch response
-    @infoparts = $query->fetchrow_array();
-    $debug > 1 ? print "Infoparts: " . Dumper(@infoparts) . "\n" : 0;
-    $basename = $infoparts[4];
-}
-else {
-    $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE basename = ?";
-    print "Query: $query_str\n" if ( $debug > 1 );
-    $query = $dbh->prepare($query_str);
-    # Retrieve program information
-    # execute query ->
-    $query->execute($user_filename);
-    # fetch response
-    @infoparts = $query->fetchrow_array();
-    $debug > 1 ? print "Infoparts: " . Dumper(@infoparts) . "\n" : 0;
-    $basename = $user_filename;
-    $title = $infoparts[5];
-    $subtitle = $infoparts[6];
-}
+
+    if ( !$user_filename ) {
+        $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE title LIKE ? AND subtitle LIKE ?";
+        print "Query: $query_str\n\tprogname: $progname\n\tsubtitle: $subtitle\n" if ( $debug > 1 );
+        $query = $dbh->prepare($query_str);
+        # Retrieve program information
+        # execute query ->
+        $query->execute($progname,$subtitle);
+        # fetch response
+        @infoparts = $query->fetchrow_array();
+        $debug > 1 ? print "Infoparts: " . Dumper(@infoparts) . "\n" : 0;
+        $basename = $infoparts[4];
+    } else {   # This query is for lookup based on the MythTV filename
+        $query_str = "SELECT chanid,starttime,endtime,originalairdate,basename,title,subtitle FROM recorded WHERE basename = ?";
+        print "Query: $query_str\n" if ( $debug > 1 );
+        $query = $dbh->prepare($query_str);
+        # Retrieve program information
+        # execute query ->
+        $query->execute($user_filename);
+        # fetch response
+        @infoparts = $query->fetchrow_array();
+        $debug > 1 ? print "Infoparts: " . Dumper(@infoparts) . "\n" : 0;
+        $basename = $user_filename;
+        $title = $infoparts[5];
+        $subtitle = $infoparts[6];
+    }
+
 
 # put the channel id and starttime into more intuitive variables
 $chanid = $infoparts[0];
@@ -225,6 +247,14 @@ if ( !@infoparts or length($infoparts[0]) == 0 or length($infoparts[1]) == 0 ) {
     exit 1; # We'll exit with a non-zero exit code.  The '1' has no significance at this time.
 }
 
+$originalairdate = $infoparts[3];
+@date_array = split /\s+/, "$infoparts[1]";
+$recordedairdate = $date_array[0];
+
+} else {
+    $progname = $title;
+    $basename = $user_filename;
+}
 
 # Add a trailing forward slash to the directories to be safe
 $recordings_dir .= '/';
@@ -258,14 +288,10 @@ $filename = "$recordings_dir" . $basename;  # use value extracted from the datab
 print "Recording Filename: $filename\n";
 
 # Get the frame rate from the video
-my $fps = `mediainfo --Inform="Video;%FrameRate%" $filename`;
+my $fps = `mediainfo --Inform="Video;%FrameRate%" "$filename"`;
 print "Detected frame-rate of input video: $fps\n" if ( $debug >= 1 );
 
-$originalairdate = $infoparts[3];
-@date_array = split /\s+/, "$infoparts[1]";
-$recordedairdate = $date_array[0];
-
-if ( ! $user_outfile ) {
+if ( !$user_outfile ) {
     # if the user specified the output filename, the thetvdb.com lookup is
     # inhibited.
     if ( length($originalairdate) > 0 and length($recordedairdate) > 0 ) {
@@ -275,65 +301,97 @@ if ( ! $user_outfile ) {
         print "Zero length query strings for thetvdb.com. Exiting...\n";
         exit 1;
     }
+    $airdate = $originalairdate ne '0000-00-00' ? $originalairdate : $recordedairdate;
 }
 
-$airdate = $originalairdate ne '0000-00-00' ? $originalairdate : $recordedairdate;
-
-# Cutlist retrieval directly from database
-# We want a cutlist if available (it is user created), so we'll query for that first.
-$query_str = "SELECT mark,type FROM recordedmarkup WHERE chanid=? AND starttime=? AND ( type=0 OR type=1 ) ORDER BY mark ASC";
-$debug > 1 ? print "Direct cutlist query string: $query_str\n" : 0;
-$query = $dbh->prepare($query_str) or die "Couldn't prepare statement: " . $dbh->errstr;
-$query->execute($chanid,$starttime);
-my @marks;
-my @types;
-my $secs;
-# Loop through each database response
-print "Cutlist/Skiplist query response:\n" if ( $debug >= 1 );
-while ( @markup = $query->fetchrow_array() ) {
-    $secs = $markup[0] / $fps;
-    print "\tmark: $markup[0] ($secs s) (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" if ( $debug >= 1 );
-    # store the markup frame number and type for later use
-    push(@marks,$markup[0]);
-    push(@types,$markup[1]);
-}
-# release the query
-$query->finish;
-
-# A cutlist was not found.  Let's query for a commercial skip list.
-if ( !@marks ) {
-    $query_str = "SELECT mark,type FROM recordedmarkup WHERE chanid=? AND starttime=? AND ( type=4 OR type=5 ) ORDER BY mark ASC";
-    print "Direct skiplist query string: $query_str\n" if ( $debug > 1 );
+if ( !$user_cutlist ) {
+    # Cutlist retrieval directly from database
+    # We want a cutlist if available (it is user created), so we'll query for that first.
+    $query_str = "SELECT mark,type FROM recordedmarkup WHERE chanid=? AND starttime=? AND ( type=0 OR type=1 ) ORDER BY mark ASC";
+    $debug > 1 ? print "Direct cutlist query string: $query_str\n" : 0;
     $query = $dbh->prepare($query_str) or die "Couldn't prepare statement: " . $dbh->errstr;
     $query->execute($chanid,$starttime);
-    # loop through each database response
+    my @marks;
+    my @types;
+    my $secs;
+    # Loop through each database response
+    print "Cutlist/Skiplist query response:\n" if ( $debug >= 1 );
     while ( @markup = $query->fetchrow_array() ) {
         $secs = $markup[0] / $fps;
         print "\tmark: $markup[0] ($secs s) (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" if ( $debug >= 1 );
-        # store for later use
+        # store the markup frame number and type for later use
         push(@marks,$markup[0]);
         push(@types,$markup[1]);
     }
     # release the query
     $query->finish;
-}
-if ( !@marks ) {
-    print "No cutlist or commercial skiplist found for specified recording.\nPlease check your inputs and/or create a cutlist then try again.  Exiting...\n";
-    exit 1;
-}
-foreach my $mark ( @marks ) {
-    # running commands with backquotes (``) will return the command output to perl.
-    $secs = $mark / $fps;
-    $cutlist_sub_str .= sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . ",";
+
+    # A cutlist was not found.  Let's query for a commercial skip list.
+    if ( !@marks ) {
+        $query_str = "SELECT mark,type FROM recordedmarkup WHERE chanid=? AND starttime=? AND ( type=4 OR type=5 ) ORDER BY mark ASC";
+        print "Direct skiplist query string: $query_str\n" if ( $debug > 1 );
+        $query = $dbh->prepare($query_str) or die "Couldn't prepare statement: " . $dbh->errstr;
+        $query->execute($chanid,$starttime);
+        # loop through each database response
+        while ( @markup = $query->fetchrow_array() ) {
+            $secs = $markup[0] / $fps;
+            print "\tmark: $markup[0] ($secs s) (" . sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . "s)\t\ttype: $markup[1]\n" if ( $debug >= 1 );
+            # store for later use
+            push(@marks,$markup[0]);
+            push(@types,$markup[1]);
+        }
+        # release the query
+        $query->finish;
+    }
+    if ( !@marks ) {
+        print "No cutlist or commercial skiplist found for specified recording.\nPlease check your inputs and/or create a cutlist then try again.  Exiting...\n";
+        exit 1;
+    }
+    foreach my $mark ( @marks ) {
+        # running commands with backquotes (``) will return the command output to perl.
+        $secs = $mark / $fps;
+        $cutlist_sub_str .= sprintf("%02d",floor($secs/3600)) . ":" . sprintf("%02d",fmod(floor($secs/60),60)) . ":" . sprintf("%06.3f",fmod($secs,60)) . ",";
+        $ctr++;
+    }
     $ctr++;
-}
-$ctr++;
-print "marks[0]: $marks[0]\n" if ( $debug > 1 );
-# We need to make sure that the first cut point is a cut-start, not a cut-end
-if ( $marks[0] == 0 or $types[0] == 0 or $types[0] == 5 ) {
-    $vidstart = 2;
+    print "marks[0]: $marks[0]\n" if ( $debug > 1 );
+    # We need to make sure that the first cut point is a cut-start, not a cut-end
+    if ( $marks[0] == 0 or $types[0] == 0 or $types[0] == 5 ) {
+        $vidstart = 2;
+    } else {
+        $vidstart = 1;
+    }
 } else {
-    $vidstart = 1;
+    # The user supplied a cutlist
+    # We should validate it before proceeding
+    #    - the format is: vidstart::timecode_1,timecode_2,...,timecode_n
+    #        - vidstart is an integer, 1 or 2, indicating which segment to be first
+    #        - timecode_n is in the format HH:MM:SS.sss
+    if ( $user_cutlist =~ m/(\d)::((\d{2}:\d{2}:\d{2}(\.\d{0,3})?,?)+)+/g ) {
+        # First, we need to capture the 2 segments
+        $vidstart = $1;
+        $cutlist_sub_str = $2;
+        print "User supplied vidstart: $vidstart\n";
+        # ensure proper input of vidstart integer...
+        if ( !($vidstart == 1 or $vidstart == 2) ) {
+            print "The starting segment parameter must either be a 1 or 2.\n";
+            exit 1;
+        }
+        $cutlist_sub_str =~ s/,$//g;
+        print "User supplied cutlist_sub_str: $cutlist_sub_str\n";
+        # We need to know how many segments there are to set the $ctr
+        # variable.
+        my @split_cutlist = split(/,/, $cutlist_sub_str);
+        $ctr = scalar(@split_cutlist) + 1;
+        print "Detected $ctr split segments.\n";
+        # @NOTE: Should we check for increasing timecodes?  How does
+        # mkvmerge handle non-increasing timecodes?
+    } else {
+        print "It seems that your supplied cutlist does not meet the required format: \n";
+        print "\tvidstart::timecode_1,timecode_2,...,timecode_n\n";
+        print "\twhere vidstart=(1,2) and\n\ttimecode_n=HH:MM:SS(.sss)\n\n";
+        exit 1;
+    }
 }
 
 #####
@@ -341,13 +399,13 @@ if ( $marks[0] == 0 or $types[0] == 0 or $types[0] == 5 ) {
 #####
 
 $outfile = '';
-if ( ! $user_outfile) {
+if ( !$user_outfile ) {
     # only query if the user didn't specify the output filename.
     if ( $subtitle ne "" ) {
         print "Beginning thetvdb.com lookup...\n";
         @T = parse_episode_content($progname);
-        $S = $T[0]; # series title
-        $E = $T[1]; # episode title
+        $S = $T[0];             # series title
+        $E = $T[1];             # episode title
         if ( length($S) == 0 or length($E) == 0 ) {
             print "Empty season or episode number returned from thetvdb.com.  Exiting...\n";
             exit 1;
@@ -363,8 +421,7 @@ if ( ! $user_outfile) {
     }
     # Display the output filename
     print "The output file name is: \"$outfile.mkv\"\n";
-}
-else {
+} else {
     $outfile = $user_outfile;
 }
 
@@ -377,12 +434,11 @@ else {
 if ( $cutlist_sub_str eq "" ) {
     print "There seems to be no cutlist or skiplist present for this recording. EXITING!!!\n";
     # Update status and comment fields in the jobqueue table to inform the user of the exit reason
-    updateStatus($dbh,$jobid,288,"There was no cut/skip list found for the recording.") if ( $jobid );
+    updateStatus($dbh,$jobid,288,"There was no cut/skip list" . $user_cutlist ? "supplied" : "found"  . " for the recording.") if ( $jobid );
     exit;
 } else {
-    # Remove any trailing commas from the culist string
-    $cutlist_sub_str =~ s/^(.+),$//;
-    $cutlist_sub_str = $1;
+    # Remove any trailing commas from the cutlist string
+    $cutlist_sub_str =~ s/,$//g;
     print "mkvmerge timecodes: $cutlist_sub_str\n" if ( $debug >= 1 );
     print "\tctr: $ctr\n\tvidstart: $vidstart\n" if ( $debug > 1 );
 }
@@ -390,7 +446,7 @@ if ( $cutlist_sub_str eq "" ) {
 if ( !$dryrun ) {
     updateStatus($dbh,$jobid,4,"($outfile): Starting ffmpeg conversion.");
     # First we need to run the MPEG-TS file through ffmpeg to mux it into a Matroska container
-    my $ffmpeg_string = "ffmpeg -y -i $filename -vcodec copy -acodec copy -f matroska $temp_dir/temp_$now.mkv";
+    my $ffmpeg_string = "ffmpeg -y -i \"$filename\" -vcodec copy -acodec copy -f matroska $temp_dir/temp_$now.mkv";
     print "Calling ffmpeg to repackage video file into Matroska (mkv) container.\n" if ( $debug >= 1 );
     print "ffmpeg call: $ffmpeg_string\n" if ( $debug > 1 );
     system $ffmpeg_string;
@@ -448,7 +504,7 @@ if ( !$dryrun ) {
     } else {
         $merge_string = "$temp_dir/split_$now-002.mkv";
     }
-    for ( $n=$vidstart+2; $n<=$ctr; $n+=2 ) {
+    for ( my $n=$vidstart+2; $n<=$ctr; $n+=2 ) {
         print "n: $n\n" if ( $debug > 1 );
         $merge_string = $merge_string . " +$temp_dir/split_$now-" . sprintf("%03d",$n) . ".mkv";
     }
@@ -487,7 +543,7 @@ if ( !$dryrun ) {
 updateStatus($dbh,$jobid,272,"($outfile): Export finished.") if ( $jobid );
 
 # disconnect from the database
-$dbh->disconnect();
+$dbh->disconnect() if ( $mysql_passwd );
 
 # Clean exit
 exit 0;

@@ -371,18 +371,18 @@ if ( !$user_cutlist ) {
         # First, we need to capture the 2 segments
         $vidstart = $1;
         $cutlist_sub_str = $2;
-        print "User supplied vidstart: $vidstart\n" if ( $debug >= 1 );
+        print "User supplied vidstart: $vidstart\n";
         # ensure proper input of vidstart integer...
         if ( !($vidstart == 1 or $vidstart == 2) ) {
             print "The starting segment parameter must either be a 1 or 2.\n";
             exit 1;
         }
-        print "User supplied cutlist_sub_str: $cutlist_sub_str\n" if ( $debug >= 1 );
+        print "User supplied cutlist_sub_str: $cutlist_sub_str\n";
         # We need to know how many segments there are to set the $ctr
         # variable.
         my @split_cutlist = split(/,/, $cutlist_sub_str);
         $ctr = scalar(@split_cutlist) + 1;
-        print "Detected $ctr split segments.\n" if ( $debug >= 1 );
+        print "Detected $ctr split segments.\n";
         # @NOTE: Should we check for increasing timecodes?  How does
         # mkvmerge handle non-increasing timecodes?
     } else {

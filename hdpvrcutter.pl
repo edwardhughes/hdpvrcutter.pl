@@ -85,7 +85,7 @@ usage() if ( @ARGV < 1 or !GetOptions(
                                       'dryrun' => \$dryrun,
                                       'title:s' => \$title,
                                       'searchtitle:s' => \$searchtitle,
-                                      'subtitle:s' => \$subtitle, # optional string - empty string is used to assume a movie
+                                      'subtitle:s' => \$subtitle,
                                       'basename:s' => \$user_filename,
                                       'host:s' => \$mysql_host,
                                       'dbname:s' => \$mysql_db,
@@ -108,7 +108,7 @@ usage() if ( !( $title || $user_filename ) );
 sub usage
         {
             print "Unknown option: @_\n" if ( @_ );
-            print "usage: hdpvrcutter.pl --passwd=PASSWORD --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR {--title=TITLE --subtitle=SUBTITLE | --basename=SRC_FILENAME} [--outfile=DST_FILENAME] [--cutlist=CUTLIST_STRING] [--verbose] [--debug] [--dryrun] [--host=HOSTNAME] [--dbname=DBNAME] [--user=USER] [--searchtitle SEARCH_TITLE] [--jobid JOBID] [--help|-?]\n";
+            print "usage: hdpvrcutter.pl --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR {--title=TITLE --subtitle=SUBTITLE | --basename=SRC_FILENAME} {--cutlist=CUTLIST_STRING | --passwd=PASSWORD [--host=HOSTNAME --dbname=DBNAME --user=USER]} [--outfile=DST_FILENAME] [--searchtitle=SEARCH_TITLE] [--jobid=JOBID] [--verbose] [--debug] [--dryrun] [--help|-?]\n";
             exit;
         }
 

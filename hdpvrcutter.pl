@@ -143,11 +143,12 @@ if ( $user_cutlist ) {
 }
 print "I'll be using the search string '$searchtitle'\n\tfor the tvdb query instead of '$title'.\n" if ( $searchtitle );
 print "***** DRY RUN.  WILL NOT PRODUCE ANY OUTPUT FILES. *****\n\n" if ( $dryrun );
-if ( $verbose && $debug == 0 ) {
+
+# Now print some confirmation of the verbosity selection
+if ( $verbose && !$debug ) {
     print "Verbose mode\n\n";
     $debug = 1;
-}
-if ( $debug ) {
+} elsif ( $debug && !$verbose ) {
     print "Debug mode\n\n";
     $debug = 2;
 } else {

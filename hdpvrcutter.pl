@@ -2,7 +2,7 @@
 #
 # HD-PVR Cutter
 #
-#	Modified by: Edward Hughes IV (edward ATSIGN edwardhughes DOT org) starting 2011/03/16
+#	Modified by: Edward Hughes IV <edward@edwardhughes.org> starting 2011/03/16
 #
 #	Originally written by: Christopher Meredith (chmeredith {at} gmail)
 #		(http://monopedilos.com/dokuwiki/doku.php?id=hdpvrcutter.pl)
@@ -23,27 +23,23 @@
 #    cybertron's perl script (http://www.justlinux.com/forum/showpost.php?p=878967&postcount=4)
 #
 # Requires:
-#    MKVtoolnix  - specifically mkvmerge to do the splitting AND the merging of the cut video >= 5.0.0
-#    ffmpeg to pre-process the recording into a Matroska container (no longer a dependency...still deciding its fate)
-#    Working MythTV database and access to the recordings directory
+#    - mkvmerge to do the splitting AND the merging of the cut video
+#    - ffmpeg to pre-process the recording into a Matroska container
+#    - mediainfo for obtaining current recording information
 #
 # Type hdpvrcutter.pl --help for usage information.
 #
 #
 # @todo: define exit codes
-#
-
 
 use LWP::UserAgent;
 use DBI;
 use File::Copy;
 use POSIX;
 use Getopt::Long;
+use Pod::Usage;
 use File::Which;
-
-# Debugging modules
 use Data::Dumper;
-
 
 ################################################################################
 ## Leave everything below this line alone unless you know what you are doing!
@@ -74,12 +70,13 @@ my $mysql_password = '';
 my $recordings_dir = '';
 my $temp_dir = '';
 my $output_dir = '';
-my $jobid = '';
-my $help = '';
+my $jobid = 0;
+my $help = 0;
+my $man = 0;
 my $basename;
 
-# Print the help if requested or no arguments are used
-usage() if ( @ARGV < 1 or !GetOptions(
+# Use GetOpt::Long to handle the command line flags
+GetOptions(
                                       'verbose' => \$verbose,
                                       'debug' => \$debug,
                                       'dryrun' => \$dryrun,
@@ -97,20 +94,12 @@ usage() if ( @ARGV < 1 or !GetOptions(
                                       'jobid:i' => \$jobid,
                                       'outfile:s' => \$user_outfile,
                                       'cutlist:s' => \$user_cutlist,
-                                      'help|?|h' => \$help)
-           );
-# Show help message if requested by user
-usage() if ( $help );
-# Show help message if user requests conflicting actions (show main
-# help message here, exit below after showing additional help message)
-usage() if ( !( $title || $user_filename ) );
+                                      'help|?|h' => \$help,
+                                      'man' => \$man) or pod2usage(2);
 
-sub usage
-        {
-            print "Unknown option: @_\n" if ( @_ );
-            print "usage: hdpvrcutter.pl --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR --dest=DESTINATION_DIR {--title=TITLE --subtitle=SUBTITLE | --basename=SRC_FILENAME} {--cutlist=CUTLIST_STRING | --passwd=PASSWORD [--host=HOSTNAME --dbname=DBNAME --user=USER]} [--outfile=DST_FILENAME] [--searchtitle=SEARCH_TITLE] [--jobid=JOBID] [--verbose] [--debug] [--dryrun] [--help|-?]\n";
-            exit;
-        }
+# Pod::Usage calls to generate help text and a manpage.
+pod2usage(-verbose => 1) if $help;
+pod2usage(-verbose => 2) if $man;
 
 # Checks and error messages for required flags
 print "Must supply the password for the MySQL MythTV database [--passwd=PASSWORD] .\n" if ( !$mysql_password && !$user_cutlist );
@@ -121,14 +110,9 @@ print "No subtitle.  I will assume we are exporting a movie? [--subtitle=SUBTITL
 print "You must specify either title OR basename, but not both.\n" if ( $user_filename && $title );
 print "To supply your own cutlist, you must also supply --basename and --outfile\n" if ( $user_cutlist && !($user_filename && $user_outfile) );
 
+# Conditional exits - these suck, but seem to work
 # Exit if not all of the required parameters are supplied
-if ( !$recordings_dir || !$temp_dir || !$output_dir ) {
-    exit;
-}
-if ( !($title || $user_filename) ) {
-    exit;
-}
-if ( !($mysql_password || $user_cutlist) ) {
+if ( !$recordings_dir || !$temp_dir || !$output_dir || !($title || $user_filename) || !($mysql_password || $user_cutlist) ) {
     exit;
 }
 # Here is where we exit for conflicting filename options
@@ -543,7 +527,7 @@ if ( !$dryrun ) {
 updateStatus($dbh,$jobid,272,"($outfile): Export finished.") if ( $jobid );
 
 # disconnect from the database
-$dbh->disconnect() if ( $mysql_passwd );
+$dbh->disconnect() if ( $mysql_password );
 
 # Clean exit
 exit 0;
@@ -830,3 +814,174 @@ sub parse_episode_content
             }
             return ($season_number, $episode_number);
         }
+
+
+__END__
+
+=head1 NAME
+
+hdpvrcutter.pl - Script to cut/edit Hauppauge HD PVR recordings made
+with MythTV, exported to Matroska container.
+
+=head1 SYNOPSIS
+
+hdpvrcutter.pl --recordings=RECORDINGS_DIR --tempdir=TEMPORARY_DIR
+--dest=DESTINATION_DIR {--title=TITLE --subtitle=SUBTITLE |
+--basename=SRC_FILENAME} {--cutlist=CUTLIST_STRING | --passwd=PASSWORD
+[--host=HOSTNAME --dbname=DBNAME --user=USER]}
+[--outfile=DST_FILENAME] [--searchtitle=SEARCH_TITLE] [--jobid=JOBID]
+[--verbose] [--debug] [--dryrun] [--help|-?] [--man]
+
+=head1 DESCRIPTION
+
+This script was created for the purpose of removing unwanted portions
+of a video recording made by the powerful Open Source DVR MythTV when
+using the Hauppauge HD PVR, component video, H.264 real-time video
+encoder.
+
+In the olden days, when a simple NTSC tuner card was all that was
+required to make MPEG2 recordings of whatever came over that magical
+copper wire, MythTV offered a built-in method to lossless-ly cut
+unwanted portions of the recording.  As video codecs have increased in
+complexity (for the sake of increased compression => space savings) it
+became more difficult to make "lossless" cuts.  With the ubiquity of
+h.264 recordings MythTV's lossless cut methods no longer functioned
+properly.  This script provides what the author has found to be the
+most reliable method of removing unwanted portions from a video
+recorded in the h.264 format, specifically those produced by the
+Hauppauge HD PVR.  As an aside, it has been found to work equally well
+with h.264-in-MPEG2-container recordings obtained with an HDHomeRun
+ATSC Over The Air (OTA) tuner.
+
+=head1 EXTERNAL DEPENDENCIES
+
+Aside from a handful of perl modules, there are three external
+programs that the script relies on for the heavy lifting.  They
+are ffmpeg, mkvmerge, and mediainfo.  As of 2012/02/05, the versions
+in use by the author are: ffmpeg (git:cd2a27e1e5), mkvmerge (v5.2.1),
+and mediainfo (v0.7.50).
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--basename>
+
+Basename of specific filename to be cut/edited.  The use of this
+option disables the lookup with thetvdb.com, and also REQUIRES the use
+of the --outfile option.  A potential use of this method of operation
+is for exporting videos located within a MythVideo archive rather than
+the main recordings directory.
+
+=item B<--cutlist>
+
+Allows user supplied cutlist instead of database lookup.  The format
+of the input string is:
+
+--cutlist=vidstart::timecode_1,timecode_2,...,timecode_n
+
+Where:
+
+- vidstart is an integer parameter, either 1 or 2, specifying which is
+the first segment to use during the merge step.  For example, if the
+recording starts with a segment that is not desired in the final
+output, the correct value would be 2, indicating that the first
+segment should be skipped.  The script assumes every other segment is
+desired in the final output.
+
+- timecode_n is a timecode of the format
+HH:MM:SS(.sss).  Ensure that they are increasing in order.
+
+=item B<--dbname>
+
+MythTV MySQL database name.  Default is mythconverg.
+
+=item B<--debug>
+
+Provide useful debugging output during runtime (additional detail
+over what --verbose provides).
+
+=item B<--dest>
+
+Path to destination directory.
+
+=item B<--dryrun>
+
+An optional debugging flag that allows the script to make all database
+and TVDB queries but stop before generating any output.
+
+=item B<--help, -h, -?>
+
+Display this help message.
+
+=item B<--host>
+
+Hostname which hosts the MythTV MySQL database.  Default is localhost.
+
+=item B<--jobid>
+
+An optional parameter only useful when the script is run as a user-job
+from within MythTV, allowing the script to update the status of
+runtime or error in the MythTV Job Queue. In the user-job command
+specification, this option should appear as --jobid=%JOBID%.
+
+=item B<--man>
+
+Display more detailed usage information.
+
+=item B<--outfile>
+
+User-overriding output file name.  Will be appended with .mkv extension.
+
+=item B<--passwd>
+
+Password for access to the MythTV MySQL database.
+
+=item B<--recordings>
+
+Path to folder containing input file, e.g., MythTV recordings
+directory.
+
+=item B<--searchtitle>
+
+An optional string for extra "help" when querying thetvdb.com.  This
+option is slowly becoming deprecated by tweaks to the automated
+search-response processing; however, if you find that your series or
+movie title is a bit obscure and is not being properly found by the
+script, you can supply the desired title, exactly as found on
+thetvdb.com, for more accurate results.
+
+=item B<--subtitle>
+
+Subtitle of recording to be exported from MythTV, e.g., episode
+title. This serves as a lookup string for querying the MythTV
+database.  It is NOT used when querying thetvdb.com.  Instead, the
+original airdate that is returned from the MythTV database is used to
+lookup specific episode information.
+
+=item B<--tempdir>
+
+Path to temporary working directory.
+
+=item B<--title>
+
+Title of recording to be exported from MythTV, e.g., series or movie
+title.  This serves as a lookup string for querying the  MythTV
+database as well as for searching thetvdb.com for episode information.
+
+=item B<--verbose>
+
+Provide some additional output during runtime.
+
+=back
+
+=head1 Author
+
+Maintained by Edward Hughes IV <edward@edwardhughes.org>, with third
+party contributions through github.com.  The project can be found at
+http://github.com/edwardhughes/hdpvrcutter.pl
+
+The script was inspired by the work of Christopher Meredith, found at
+http://monopedilos.com/dokuwiki/doku.php?id=hdpvrcutter.pl
+
+=cut

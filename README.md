@@ -20,10 +20,7 @@ removing unwanted portions of a recording made by MythTV.
 
 Update 2012/02/05: Much more usage and an update to the latest
 version of mkvmerge (v5.2.1) has shown promising results with
-non-keyframe cut-points.  Additional testing with the 'nomyth' branch,
-which is aimed at allowing the user to supply the cutlist to edit
-non-MythTV stored videos, has worked quite well with arbitrarily
-specified cut-points.  As usual, YMMV.
+non-keyframe cut-points.  Additional testing with the recently merged 'nomyth' branch, which is aimed at allowing the user to supply the cutlist to edit non-MythTV stored videos, has worked quite well with arbitrarily specified cut-points.  As usual, YMMV.
 
 ## Execution
 

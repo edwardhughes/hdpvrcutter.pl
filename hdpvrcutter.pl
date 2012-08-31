@@ -259,7 +259,7 @@ $global_user_agent = LWP::UserAgent->new;
 print "Program Name: $progname\n";
 print "Subtitle: $subtitle\n";
 $progname =~ s/\'/\\'/g;        # SQL doesn't like apostrophes
-$subtitle =~ s /\'/\\'/g;
+$subtitle =~ s/\'/\\'/g;
 
 # Be sure to override the MythTV program name with the alternate search-title, if supplied
 $progname = $searchtitle if ( $searchtitle );
